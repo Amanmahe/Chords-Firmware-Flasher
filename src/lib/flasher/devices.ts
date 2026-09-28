@@ -3,8 +3,8 @@ import type { DeviceDef } from "./types";
 /**
  * Device catalogue.
  *
- * Put your binaries in /public/firmware/<device-id>/ and point `firmware`
- * at them. Every device also accepts a custom file upload in the UI.
+ * Each device's `firmware` points at its file in the latest Chords release
+ * (see FIRMWARE_BASE). Every device also accepts a custom file upload in the UI.
  *
  *  - ESP32:      merged image (Arduino "Export compiled binary" -> *.merged.bin) at 0x0,
  *                or list bootloader / partitions / app separately with their offsets.
@@ -14,6 +14,15 @@ import type { DeviceDef } from "./types";
  *  - RP2040:     .uf2 (a .bin is converted to UF2 automatically)
  */
 
+/**
+ * Firmware comes from the latest Chords-Arduino-Firmware GitHub release,
+ * served with CORS headers by a Cloudflare Worker (GitHub downloads have none).
+ * Override with NEXT_PUBLIC_FIRMWARE_BASE, e.g. to pin a tag: ".../firmware/v1.0.4".
+ */
+export const FIRMWARE_BASE =
+  process.env.NEXT_PUBLIC_FIRMWARE_BASE ?? "https://mute-union-1cca.amanmaheshwari715.workers.dev/firmware/latest";
+const release = (file: string) => `${FIRMWARE_BASE}/${file}`;
+
 const ARDUINO_VID = 0x2341;
 const ST_VID = 0x0483;
 const RPI_VID = 0x2e8a;
@@ -21,7 +30,8 @@ const RPI_VID = 0x2e8a;
 const STM32_DFU_STEPS = [
   "Hold BOOT0, tap NRST (reset), then release BOOT0.",
   "The board now shows up as \"STM32 BOOTLOADER\" (0483:DF11).",
-  "Press Flash and pick \"STM32 BOOTLOADER\". The browser remembers it for next time.",
+  "Press Flash. If the board isn't found, the device list opens: pick \"STM32 BOOTLOADER\" (it can also be listed as \"DFU in FS Mode\"). If the same board is listed several times, any entry works.",
+  "When the log says so, press NRST (without BOOT0) to start the new firmware.",
   "Windows only: if it isn't listed, install the WinUSB driver once with Zadig.",
 ];
 
@@ -38,7 +48,7 @@ export const DEVICES: DeviceDef[] = [
     name: "NPG-LITE-ESP32C6",
     family: "ESP32",
     protocol: "esptool",
-    firmware: [{ url: "/firmware/npg-lite-esp32c6/firmware.bin", address: 0x0 }],
+    firmware: [{ url: release("Chords-NPG-LITE-ESP32C6.bin"), address: 0x0 }],
     accept: ".bin",
     espBaud: 921600,
     instructions: [
@@ -51,7 +61,7 @@ export const DEVICES: DeviceDef[] = [
     name: "NPG-LITE-BLE-ESP32C6",
     family: "ESP32",
     protocol: "esptool",
-    firmware: [{ url: "/firmware/npg-lite-ble-esp32c6/firmware.bin", address: 0x0 }],
+    firmware: [{ url: release("Chords-NPG-LITE-BLE-ESP32C6.bin"), address: 0x0 }],
     accept: ".bin",
     espBaud: 921600,
     instructions: [
@@ -64,7 +74,7 @@ export const DEVICES: DeviceDef[] = [
     name: "ESP32-S3",
     family: "ESP32",
     protocol: "esptool",
-    firmware: [{ url: "/firmware/esp32-s3/firmware.bin", address: 0x0 }],
+    firmware: [{ url: release("Chords-ESP32-S3.bin"), address: 0x0 }],
     accept: ".bin",
     espBaud: 921600,
     instructions: [
@@ -79,7 +89,7 @@ export const DEVICES: DeviceDef[] = [
     name: "STM32G4-CORE-BOARD",
     family: "STM32",
     protocol: "dfuse",
-    firmware: [{ url: "/firmware/stm32g4-core-board/firmware.bin", address: 0x08000000 }],
+    firmware: [{ url: release("Chords-STM32G4-CORE-BOARD.bin"), address: 0x08000000 }],
     accept: ".bin",
     usbFilters: [{ vendorId: ST_VID, productId: 0xdf11 }],
     dfuseAddress: 0x08000000,
@@ -90,7 +100,7 @@ export const DEVICES: DeviceDef[] = [
     name: "STM32F401CC-BLACK-PILL",
     family: "STM32",
     protocol: "dfuse",
-    firmware: [{ url: "/firmware/stm32f401cc-black-pill/firmware.bin", address: 0x08000000 }],
+    firmware: [{ url: release("Chords-STM32F401CC-BLACK-PILL.bin"), address: 0x08000000 }],
     accept: ".bin",
     usbFilters: [{ vendorId: ST_VID, productId: 0xdf11 }],
     dfuseAddress: 0x08000000,
@@ -101,7 +111,7 @@ export const DEVICES: DeviceDef[] = [
     name: "STM32F411CE-BLACK-PILL",
     family: "STM32",
     protocol: "dfuse",
-    firmware: [{ url: "/firmware/stm32f411ce-black-pill/firmware.bin", address: 0x08000000 }],
+    firmware: [{ url: release("Chords-STM32F411CE-BLACK-PILL.bin"), address: 0x08000000 }],
     accept: ".bin",
     usbFilters: [{ vendorId: ST_VID, productId: 0xdf11 }],
     dfuseAddress: 0x08000000,
@@ -114,7 +124,7 @@ export const DEVICES: DeviceDef[] = [
     name: "GIGA-R1",
     family: "Arduino Mbed",
     protocol: "dfuse",
-    firmware: [{ url: "/firmware/giga-r1/firmware.bin", address: 0x08040000 }],
+    firmware: [{ url: release("Chords-GIGA-R1.bin"), address: 0x08040000 }],
     accept: ".bin",
     usbFilters: [
       { vendorId: ARDUINO_VID, productId: 0x0366 },
@@ -135,7 +145,7 @@ export const DEVICES: DeviceDef[] = [
     name: "UNO-R4-MINIMA",
     family: "Arduino Renesas",
     protocol: "dfu",
-    firmware: [{ url: "/firmware/uno-r4-minima/firmware.bin", address: 0x0 }],
+    firmware: [{ url: release("Chords-UNO-R4-MINIMA.bin"), address: 0x0 }],
     accept: ".bin",
     usbFilters: [{ vendorId: ARDUINO_VID, productId: 0x0369 }],
     touch1200: true,
@@ -151,7 +161,7 @@ export const DEVICES: DeviceDef[] = [
     name: "UNO-R4-WIFI",
     family: "Arduino Renesas",
     protocol: "samba-r4",
-    firmware: [{ url: "/firmware/uno-r4-wifi/firmware.bin", address: 0x0 }],
+    firmware: [{ url: release("Chords-UNO-R4-WIFI.bin"), address: 0x0 }],
     accept: ".bin",
     instructions: [
       "Connect the UNO R4 WiFi over USB.",
@@ -165,7 +175,7 @@ export const DEVICES: DeviceDef[] = [
     name: "RPI-PICO-RP2040",
     family: "RP2040",
     protocol: "picoboot",
-    firmware: [{ url: "/firmware/rpi-pico-rp2040/firmware.uf2", address: 0x10000000 }],
+    firmware: [{ url: release("Chords-RPI-PICO-RP2040.uf2"), address: 0x10000000 }],
     accept: ".uf2,.bin",
     usbFilters: [{ vendorId: RPI_VID, productId: 0x0003 }],
     touch1200: true,
@@ -184,7 +194,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-UNO-R3",
     family: "AVR",
     protocol: "stk500v1",
-    firmware: [{ url: "/firmware/avr-uno-r3/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-UNO-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200],
     pageSize: 128,
@@ -195,7 +205,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-GENUINO-UNO",
     family: "AVR",
     protocol: "stk500v1",
-    firmware: [{ url: "/firmware/avr-genuino-uno/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-UNO-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200],
     pageSize: 128,
@@ -206,7 +216,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-UNO-CLONE-MAKER-UNO",
     family: "AVR",
     protocol: "stk500v1",
-    firmware: [{ url: "/firmware/avr-uno-clone-maker-uno/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-UNO-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200, 57600],
     pageSize: 128,
@@ -217,7 +227,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-NANO-CLASSIC",
     family: "AVR",
     protocol: "stk500v1",
-    firmware: [{ url: "/firmware/avr-nano-classic/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-NANO-CLASSIC.bin"), address: 0 }],
     accept: ".hex,.bin",
     // New Optiboot first, then the "Old Bootloader" (ATmegaBOOT) speed.
     baudRates: [115200, 57600],
@@ -229,7 +239,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-NANO-CLONE-MAKER-NANO",
     family: "AVR",
     protocol: "stk500v1",
-    firmware: [{ url: "/firmware/avr-nano-clone-maker-nano/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-NANO-CLASSIC.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200, 57600],
     pageSize: 128,
@@ -240,7 +250,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-MEGA-2560-R3",
     family: "AVR",
     protocol: "stk500v2",
-    firmware: [{ url: "/firmware/avr-mega-2560-r3/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-MEGA-2560-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200],
     pageSize: 256,
@@ -251,7 +261,7 @@ export const DEVICES: DeviceDef[] = [
     name: "AVR-MEGA-2560-CLONE",
     family: "AVR",
     protocol: "stk500v2",
-    firmware: [{ url: "/firmware/avr-mega-2560-clone/firmware.hex", address: 0 }],
+    firmware: [{ url: release("Chords-MEGA-2560-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
     baudRates: [115200],
     pageSize: 256,

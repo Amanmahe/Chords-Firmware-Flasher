@@ -1,1 +1,25 @@
-node_modules/
+# dependencies
+/node_modules
+
+# Next.js build output
+/.next/
+/out/
+next-env.d.ts
+
+# TypeScript
+*.tsbuildinfo
+
+# env files (NEXT_PUBLIC_FIRMWARE_BASE etc. can go in .env.local)
+.env*
+!.env.example
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# misc
+.DS_Store
+*.pem
+.vercel

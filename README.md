@@ -1,4 +1,4 @@
-# Web Firmware Flasher (Next.js + Tailwind)
+# Chords Firmware Flasher (Next.js + Tailwind)
 
 This page flashes all 17 boards from the browser. There's nothing to install on the user's PC; you need Chrome, Edge or Opera on desktop, over HTTPS or localhost.
 

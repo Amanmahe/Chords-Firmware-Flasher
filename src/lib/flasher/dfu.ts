@@ -7,6 +7,9 @@ import { openBootloaderUsb, restartIfStillThere } from "./usb";
 /* USB DFU 1.1 + ST DfuSe over WebUSB                                          */
 /* -------------------------------------------------------------------------- */
 
+/** STMicroelectronics: the STM32 system (ROM) bootloader. */
+const ST_VID = 0x0483;
+
 const DFU = { DETACH: 0, DNLOAD: 1, UPLOAD: 2, GETSTATUS: 3, CLRSTATUS: 4, GETSTATE: 5, ABORT: 6 } as const;
 const STATE = {
   appIDLE: 0,
@@ -200,7 +203,7 @@ function parseConfig(d: DataView): DescInfo {
 }
 
 async function openDfu(filters: USBDeviceFilter[], afterReset: boolean, cb: FlashCallbacks, preferAlt?: RegExp) {
-  const dev = await openBootloaderUsb(filters, afterReset, "DFU device");
+  const dev = await openBootloaderUsb(filters, afterReset, "DFU device", cb.log);
   if (!dev.configuration) await dev.selectConfiguration(1);
 
   const desc = parseConfig(await readConfigDescriptor(dev));
@@ -319,7 +322,18 @@ export async function flashDfuse(job: FlashJob, afterReset: boolean) {
       cb.progress(30 + ((b + 1) / n) * 70, "Writing flash");
     }
 
-    // 3. leave DFU and jump to the application
+    // 3. start the application
+    if (dfu.dev.vendorId === ST_VID) {
+      // The ST system bootloader only leaves DFU on the GETSTATUS that follows
+      // a zero-length download, and it drops off the bus inside that request.
+      // A device that disconnects while still open lingers in Chrome's picker
+      // as a dead duplicate entry, and DFU DETACH just switches its USB off
+      // without starting the application. So stay in DFU, close, and let the
+      // user reset the board.
+      await dfu.close();
+      cb.log("Flash written. Press NRST (reset) on the board to start the new firmware.");
+      return;
+    }
     cb.log("Leaving DFU mode…");
     await special(0x21, start);
     try {

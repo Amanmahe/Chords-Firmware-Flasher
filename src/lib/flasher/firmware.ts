@@ -1,3 +1,5 @@
+import { getSavedFirmware, saveFirmware } from "./firmware-cache";
+
 /** Parse Intel HEX into a contiguous image starting at the lowest address. */
 export function parseIntelHex(text: string): { data: Uint8Array; start: number } {
   const chunks: { addr: number; bytes: number[] }[] = [];
@@ -53,10 +55,71 @@ export function toBinary(bytes: Uint8Array, name: string): { data: Uint8Array; s
   return { data: bytes, start: null };
 }
 
-export async function fetchFirmware(url: string): Promise<Uint8Array> {
-  const res = await fetch(url, { cache: "no-store" });
+/** Download a firmware file; `version` is the release tag when served by the firmware Worker. */
+export async function fetchFirmware(url: string): Promise<{ bytes: Uint8Array; version: string | null }> {
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch {
+    throw new Error(`Couldn't download ${url}. Check your internet connection, or upload a file instead.`);
+  }
   if (!res.ok) throw new Error(`Couldn't load ${url} (HTTP ${res.status}). Upload a file instead.`);
-  return new Uint8Array(await res.arrayBuffer());
+  return { bytes: new Uint8Array(await res.arrayBuffer()), version: res.headers.get("X-Firmware-Version") };
+}
+
+/** Release file name from its URL, e.g. "Chords-UNO-R4-MINIMA.bin". */
+export const fileNameOf = (url: string) => decodeURIComponent(url.split("/").pop()!);
+
+let latestTag: { at: number; tag: string | null } | null = null;
+
+/**
+ * Tag of the release that `base` serves: fixed when it is pinned
+ * (".../firmware/v1.0.4"), otherwise asked from the Worker's /latest route
+ * (remembered for a minute). null when it can't be found out.
+ */
+export async function releaseVersion(base: string): Promise<string | null> {
+  const pinned = base.split("/").pop()!;
+  if (pinned !== "latest") return pinned;
+  if (latestTag && performance.now() - latestTag.at < 60_000) return latestTag.tag;
+  try {
+    const res = await fetch(new URL("/latest", base).href, { cache: "no-store", signal: AbortSignal.timeout(5000) });
+    const tag: string | null = res.ok ? ((await res.json()).tag ?? null) : null;
+    latestTag = { at: performance.now(), tag };
+    return tag;
+  } catch {
+    return null;
+  }
+}
+
+/** Download a release file and save it in IndexedDB. */
+export async function downloadFirmware(url: string) {
+  const { bytes, version } = await fetchFirmware(url);
+  await saveFirmware({ name: fileNameOf(url), version, size: bytes.length, savedAt: Date.now(), url }, bytes);
+  return { bytes, version };
+}
+
+/**
+ * Firmware to flash: the saved copy when it is already the latest release,
+ * otherwise a fresh download (saved for next time). Falls back to the saved
+ * copy when the download fails, e.g. offline.
+ */
+export async function loadFirmware(url: string, base: string, log: (msg: string) => void) {
+  const name = fileNameOf(url);
+  const saved = await getSavedFirmware(name);
+  if (saved?.version && saved.version === (await releaseVersion(base))) {
+    log(`Using saved ${name} (${saved.version})`);
+    return new Uint8Array(saved.data);
+  }
+  try {
+    log(`Downloading ${name}…`);
+    const { bytes, version } = await downloadFirmware(url);
+    log(`Downloaded ${name}${version ? ` (${version})` : ""} and saved it for next time`);
+    return bytes;
+  } catch (e) {
+    if (!saved) throw e;
+    log(`Download failed, using saved ${name}${saved.version ? ` (${saved.version})` : ""}`);
+    return new Uint8Array(saved.data);
+  }
 }
 
 export function padTo(data: Uint8Array, multiple: number, fill = 0xff) {

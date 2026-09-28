@@ -1,5 +1,6 @@
 import type { DeviceDef, FlashCallbacks, FlashJob } from "./types";
-import { fetchFirmware, toBinary } from "./firmware";
+import { fileNameOf, loadFirmware, toBinary } from "./firmware";
+import { FIRMWARE_BASE } from "./devices";
 import { findOrPickSerialPort, pickSerialPort, sleep, touch1200 } from "./serial";
 import { flashEsp } from "./esp";
 import { flashStk500v1, flashStk500v2 } from "./avr";
@@ -10,7 +11,9 @@ import { flashUf2 } from "./uf2";
 import { flashPicoboot } from "./picoboot";
 
 export * from "./types";
-export { DEVICES, PROTOCOL_LABEL } from "./devices";
+export { DEVICES, FIRMWARE_BASE, PROTOCOL_LABEL } from "./devices";
+export { downloadFirmware, fileNameOf, releaseVersion } from "./firmware";
+export * from "./firmware-cache";
 
 export interface FlashRequest {
   device: DeviceDef;
@@ -52,8 +55,8 @@ async function loadParts(req: FlashRequest, cb: FlashCallbacks): Promise<FlashJo
   } else {
     if (!device.firmware.length) throw new Error("No bundled firmware for this board. Upload a file.");
     for (const p of device.firmware) {
-      cb.log(`Loading ${p.url}…`);
-      raw.push({ bytes: await fetchFirmware(p.url), name: p.label ?? p.url.split("/").pop()!, address: p.address });
+      const bytes = await loadFirmware(p.url, FIRMWARE_BASE, cb.log);
+      raw.push({ bytes, name: p.label ?? fileNameOf(p.url), address: p.address });
     }
   }
 
