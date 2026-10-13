@@ -1,4 +1,4 @@
-import { NeedsUserGesture } from "./types";
+import { NeedsUserGesture, type FlashCallbacks } from "./types";
 import { sleep } from "./serial";
 
 /* -------------------------------------------------------------------------- */
@@ -47,28 +47,52 @@ export async function findBootloaderUsb(filters: USBDeviceFilter[]) {
   return (await openAuthorized(filters, 0)).dev;
 }
 
-async function requestUsb(filters: USBDeviceFilter[], label: string): Promise<USBDevice> {
+/**
+ * Boards flashed with older versions of this page left the board's dead
+ * entries in Chrome's list (until the browser restarts). Access is granted per
+ * serial number, so whichever entry is picked, the live board is opened.
+ */
+const duplicatesHint = (label: string) =>
+  `If "${label}" is listed more than once, pick any: the extras are old entries the browser keeps until it restarts.`;
+
+/** Shown when the board is in its bootloader and the user must pick it. */
+function pickBootloaderMessage(label: string) {
+  return (
+    `The board is now in bootloader (DFU) mode. Click Continue and select "${label}" in the browser's list. ` +
+    "The browser remembers it, so next time a single click is enough. " +
+    duplicatesHint(label)
+  );
+}
+
+async function requestUsb(filters: USBDeviceFilter[], label: string, cb?: FlashCallbacks): Promise<USBDevice> {
+  cb?.log(`Select "${label}" in the browser's list. ${duplicatesHint(label)}`);
+  cb?.pickerOpen?.(true, "usb");
   try {
     return await navigator.usb.requestDevice({ filters });
   } catch (e) {
     if (e instanceof DOMException && e.name === "SecurityError") {
-      throw new NeedsUserGesture(
-        `One-time setup: the board is in bootloader mode. Click Flash again and pick the ${label}. ` +
-          "The browser remembers it, so next time a single click is enough.",
-      );
+      throw new NeedsUserGesture(pickBootloaderMessage(label));
     }
     if (e instanceof DOMException && e.name === "NotFoundError") {
-      throw new Error(`No ${label} selected. Is the board in bootloader mode?`);
+      throw new Error(
+        `No ${label} selected. Is the board in bootloader mode?` +
+          (/Win/i.test(navigator.userAgent)
+            ? " On Windows the browser only lists a bootloader that has the WinUSB driver:" +
+              " install it once (steps on this page), then try again."
+            : ""),
+      );
     }
     throw e;
+  } finally {
+    cb?.pickerOpen?.(false, "usb");
   }
 }
 
-function accessDenied(filters: USBDeviceFilter[], label: string, cause: unknown) {
+export function accessDenied(filters: USBDeviceFilter[], label: string, cause: unknown) {
   const f = filters[0] ?? {};
   const id = `${(f.vendorId ?? 0).toString(16).padStart(4, "0")}:${(f.productId ?? 0).toString(16).padStart(4, "0")}`;
   const hint = /Win/i.test(navigator.userAgent)
-    ? `Windows is using a driver the browser can't open. Run Zadig (Options → List All Devices), pick the ${label} (${id}), and install WinUSB.`
+    ? `Windows is using a driver the browser can't open for the ${label} (${id}). Install the WinUSB driver once (steps on this page), then try again.`
     : /Linux/i.test(navigator.userAgent)
       ? "Unplug and replug the board and try again. " +
         `If it still fails, add a udev rule: SUBSYSTEM=="usb", ATTRS{idVendor}=="${id.slice(0, 4)}", MODE="0666", then run "sudo udevadm control --reload && sudo udevadm trigger" and replug.`
@@ -79,52 +103,49 @@ function accessDenied(filters: USBDeviceFilter[], label: string, cause: unknown)
 /**
  * Open the bootloader: reuse a device this site was already granted, or ask
  * the user to pick one (needs a click, so it may throw NeedsUserGesture).
- *
- * The browser's device list opens as soon as no granted board answers. Chrome
- * keeps listing bootloaders that have since disconnected (e.g. an STM32 that
- * re-enumerates as its sketch right after flashing), so a granted entry alone
- * doesn't mean the board is there; waiting on it would also outlive the click
- * that lets the page open the list.
  */
 export async function openBootloaderUsb(
   filters: USBDeviceFilter[],
   afterReset: boolean,
   label: string,
-  log: (msg: string) => void = () => {},
+  cb?: FlashCallbacks,
 ) {
   if (!("usb" in navigator)) {
     throw new Error("WebUSB is not available. Use Chrome, Edge or Opera on desktop.");
   }
+  // After a reset, give the bootloader time to enumerate and udev time to set permissions.
+  const first = await openAuthorized(filters, afterReset ? 5000 : 0);
+  let dev = first.dev;
+  if (dev) return dev;
 
-  // After a reset, give the bootloader time to enumerate and udev time to
-  // set permissions. Without a reset, still retry briefly: the board may
-  // have just been put into bootloader mode by hand.
-  if ((await authorizedDevices(filters)).length) {
-    const { dev } = await openAuthorized(filters, afterReset ? 5000 : 1500);
-    if (dev) return dev;
-  }
+  // Windows: the paired bootloader is plugged in but can't be opened, i.e. it
+  // lacks the WinUSB driver. The list would only offer that same unusable
+  // board, so go straight to the driver steps instead of showing it.
+  if (first.error && /Win/i.test(navigator.userAgent)) throw accessDenied(filters, label, first.error);
 
-  // No granted board answered (first time, a different board, or the board
-  // isn't in bootloader mode yet). Ask the user. Access is granted per serial
-  // number, so picking a dead duplicate also grants the live entry, which
-  // openAuthorized() then finds.
-  log(
-    `No ${label} found. Pick it from the list; if it isn't there yet, put the board in bootloader mode ` +
-      "and it appears. If the same board is listed several times, any of those entries works.",
-  );
-  const picked = await requestUsb(filters, label);
-  const { dev } = await openAuthorized(filters, 3000);
+  // We just reset the board ourselves and it isn't granted yet: always stop
+  // and let the user press Continue. Opening the list straight away would
+  // depend on timing (the click may still count, and the bootloader may not
+  // be listed yet), which made some boards fail where others asked.
+  if (afterReset) throw new NeedsUserGesture(pickBootloaderMessage(label));
+
+  // Nothing authorized opened (none granted yet, e.g. a different board, or
+  // only stale entries). Ask the user; each board is granted separately.
+  const picked = await requestUsb(filters, label, cb);
+  ({ dev } = await openAuthorized(filters, 3000));
   if (dev) return dev;
   try {
     await picked.open();
     return picked;
   } catch (e) {
-    // A dead entry of the same board may have been picked; its live entry is
-    // granted now too, so the next click finds it without the list.
+    // Chrome can keep listing a bootloader that has already disconnected,
+    // under the same name as the live one. If that stale entry was picked,
+    // let the next click try again instead of failing.
     const listed = await authorizedDevices(filters);
     if (listed.some((d) => d !== picked)) {
       throw new NeedsUserGesture(
-        "That was an old entry the browser still lists. Click Flash again; it now finds the board by itself.",
+        "That was an old entry the browser still lists. Click Continue; if the list opens, " +
+          `pick the other "${label}" with the same name.`,
       );
     }
     throw accessDenied(filters, label, e);

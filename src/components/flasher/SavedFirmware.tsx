@@ -90,7 +90,7 @@ export function SavedFirmware({
       </div>
       <p className="mt-1 shrink-0 text-xs text-neutral-500">
         Latest release: <span className="text-neutral-300">{latest ?? "unknown (offline?)"}</span> · saved in this
-        browser, used when flashing
+        browser
       </p>
 
       {saved.length === 0 ? (
@@ -98,37 +98,49 @@ export function SavedFirmware({
           Nothing saved yet. Firmware is saved here the first time you flash or download it.
         </p>
       ) : (
-        <ul className="-mr-2 mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-2">
+        // Two lines per file, so a whole release fits without scrolling.
+        <ul className="-mr-2 mt-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-2">
           {saved.map((f) => {
             const outdated = latest && f.version && f.version !== latest;
             const current = activeFiles.includes(f.name);
             return (
               <li
                 key={f.name}
-                className={`rounded-lg border px-3 py-2 text-sm ${
+                className={`rounded-lg border px-3 py-1 text-xs leading-4 ${
                   current ? "border-blue-500/50 bg-blue-500/5" : "border-neutral-800 bg-neutral-950/40"
                 }`}
               >
-                <div className="truncate font-mono text-xs text-neutral-200" title={f.name}>
-                  {f.name}
+                <div className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-neutral-200" title={f.name}>
+                    {f.name}
+                  </span>
+                  <span className={`shrink-0 ${outdated ? "text-amber-300" : "text-green-400"}`}>{f.version ?? "?"}</span>
                 </div>
-                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-neutral-500">
-                  <span className={outdated ? "text-amber-300" : "text-green-400"}>{f.version ?? "?"}</span>
-                  {outdated && <span className="text-amber-300">update on next flash</span>}
+                <div className="flex items-center gap-2 text-neutral-500">
                   <span>{kb(f.size)}</span>
-                  <span>{when(f.savedAt)}</span>
-                </div>
-                <div className="mt-1 flex gap-3 text-xs">
-                  <button onClick={() => saveToDisk(f.name)} className="text-neutral-400 hover:text-neutral-200 hover:underline">
-                    Save file
-                  </button>
-                  <button
-                    disabled={busy}
-                    onClick={() => deleteSavedFirmware(f.name)}
-                    className="text-neutral-400 hover:text-red-300 hover:underline disabled:opacity-50"
-                  >
-                    Delete
-                  </button>
+                  {outdated ? (
+                    <span className="text-amber-300" title={`Saved ${when(f.savedAt)}`}>
+                      update on next flash
+                    </span>
+                  ) : (
+                    <span>{when(f.savedAt)}</span>
+                  )}
+                  <span className="ml-auto flex shrink-0 gap-3">
+                    <button
+                      onClick={() => saveToDisk(f.name)}
+                      className="text-neutral-400 hover:text-neutral-200 hover:underline"
+                      title="Save the file to this computer"
+                    >
+                      Save
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() => deleteSavedFirmware(f.name)}
+                      className="text-neutral-400 hover:text-red-300 hover:underline disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </span>
                 </div>
               </li>
             );

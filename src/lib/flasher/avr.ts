@@ -40,15 +40,30 @@ async function v1cmd(io: SerialIO, bytes: number[], replyData = 0, timeout = 500
   return data;
 }
 
+async function v1getSync(io: SerialIO): Promise<boolean> {
+  io.flushInput();
+  await io.write([0x30, CRC_EOP]); // STK_GET_SYNC
+  try {
+    const r = await io.read(2, 200);
+    return r[0] === STK_INSYNC && r[1] === STK_OK;
+  } catch (e) {
+    if (!(e instanceof TimeoutError)) throw e;
+    return false;
+  }
+}
+
 async function v1sync(io: SerialIO): Promise<boolean> {
   for (let i = 0; i < 10; i++) {
+    if (!(await v1getSync(io))) continue;
+    // Earlier GET_SYNCs sent while the bootloader was starting can be answered
+    // late; those extra 0x14 0x10 pairs would shift every later reply (e.g.
+    // "Bad reply 0x95" from the signature). Let them arrive, drop them, and
+    // confirm with one clean exchange, as avrdude does.
+    await sleep(100);
     io.flushInput();
-    await io.write([0x30, CRC_EOP]); // STK_GET_SYNC
-    try {
-      const r = await io.read(2, 200);
-      if (r[0] === STK_INSYNC && r[1] === STK_OK) return true;
-    } catch (e) {
-      if (!(e instanceof TimeoutError)) throw e;
+    if (await v1getSync(io)) {
+      await sleep(20);
+      if (io.available === 0) return true;
     }
   }
   return false;
@@ -57,7 +72,7 @@ async function v1sync(io: SerialIO): Promise<boolean> {
 export async function flashStk500v1({ device, parts, options, cb }: FlashJob) {
   const pageSize = device.pageSize ?? 128;
   const image = imageFrom(parts[0], pageSize);
-  const port = await pickSerialPort();
+  const port = await pickSerialPort(undefined, cb);
   const bauds = device.baudRates ?? [115200];
 
   let io: SerialIO | null = null;
@@ -172,7 +187,7 @@ class Stk500v2 {
 export async function flashStk500v2({ device, parts, options, cb }: FlashJob) {
   const pageSize = device.pageSize ?? 256;
   const image = imageFrom(parts[0], pageSize);
-  const port = await pickSerialPort();
+  const port = await pickSerialPort(undefined, cb);
   const io = new SerialIO(port);
 
   try {

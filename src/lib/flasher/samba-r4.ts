@@ -1,5 +1,5 @@
 import type { FlashJob } from "./types";
-import { SerialIO, pickSerialPort, sleep, touch1200 } from "./serial";
+import { SerialIO, TimeoutError, pickSerialPort, sleep, touch1200 } from "./serial";
 import { padTo } from "./firmware";
 
 /**
@@ -39,11 +39,39 @@ async function command(io: SerialIO, cmd: string, timeout = 1000) {
   return new TextDecoder().decode(r);
 }
 
+/**
+ * "K#" resets the RA4M1, which should then boot the sketch. It doesn't always
+ * (the board then needs a replug), so check: if the bootloader still answers
+ * "N#", send "K#" again. The sketch ignores "N#" (it replies "UNKNOWN COMMAND"
+ * after its 1 s readStringUntil timeout), and that reply is drained so it
+ * can't be mistaken for the next WHORU answer.
+ */
+async function leaveBootloader(io: SerialIO, cb: FlashJob["cb"]) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    io.flushInput();
+    await io.write("K#");
+    // Bootloader waits 500 ms (double-tap window) before starting the sketch.
+    await sleep(1000);
+    io.flushInput();
+    await io.write("N#");
+    try {
+      await io.readUntil(0x0d, 500, "bootloader");
+    } catch (e) {
+      if (!(e instanceof TimeoutError)) throw e;
+      await sleep(1200); // let the sketch time out on "N#" and reply
+      io.flushInput();
+      return; // no bootloader reply: the sketch is running
+    }
+    cb.log("Board is still in the bootloader, resetting again…");
+  }
+  throw new Error("The board stayed in its bootloader. Press RESET on the board (or replug it).");
+}
+
 export async function flashUnoR4Wifi({ parts, options, cb }: FlashJob) {
   const image = padTo(parts[0].data, CHUNK);
   if (parts[0].data.length > MAX_SIZE) throw new Error("Firmware is larger than the RA4M1 sketch area");
 
-  const port = await pickSerialPort();
+  const port = await pickSerialPort(undefined, cb);
 
   cb.log("Asking the USB bridge to start the bootloader (1200 baud touch)…");
   await touch1200(port);
@@ -102,9 +130,7 @@ export async function flashUnoR4Wifi({ parts, options, cb }: FlashJob) {
     }
 
     cb.log("Resetting into sketch…");
-    io.flushInput();
-    await io.write("K#");
-    await sleep(100);
+    await leaveBootloader(io, cb);
   } finally {
     await io.close();
   }

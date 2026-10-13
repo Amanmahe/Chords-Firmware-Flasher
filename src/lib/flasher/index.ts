@@ -1,4 +1,4 @@
-import type { DeviceDef, FlashCallbacks, FlashJob } from "./types";
+import { NeedsUserGesture, type DeviceDef, type FlashCallbacks, type FlashJob } from "./types";
 import { fileNameOf, loadFirmware, toBinary } from "./firmware";
 import { FIRMWARE_BASE } from "./devices";
 import { findOrPickSerialPort, pickSerialPort, sleep, touch1200 } from "./serial";
@@ -12,6 +12,7 @@ import { flashPicoboot } from "./picoboot";
 
 export * from "./types";
 export { DEVICES, FIRMWARE_BASE, PROTOCOL_LABEL } from "./devices";
+export { DRIVER_INSTALLER_URL, ZADIG_URL, driverInstallerCovers, usbIdOf } from "./drivers";
 export { downloadFirmware, fileNameOf, releaseVersion } from "./firmware";
 export * from "./firmware-cache";
 
@@ -72,6 +73,12 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
   const size = parts.reduce((a, p) => a + p.data.length, 0);
   cb.log(`Firmware: ${parts.map((p) => p.name).join(", ")} (${(size / 1024).toFixed(1)} KB)`);
 
+  // The browser only opens its port list for a few seconds after a click, and
+  // a slow firmware download (ESP32 images are 4 MB) can outlast that.
+  if (needsApi(req.device) === "serial" && navigator.userActivation?.isActive === false) {
+    throw new NeedsUserGesture("The firmware is ready. Click Continue and pick the board's serial port.");
+  }
+
   const job: FlashJob = {
     device: req.device,
     parts,
@@ -97,7 +104,7 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
       const inBootloader = !!(await findBootloaderUsb(req.device.usbFilters!));
       if (req.device.touch1200 && !req.skipTouch && !inBootloader) {
         cb.log("Resetting the board into the bootloader…");
-        const port = await findOrPickSerialPort(req.device.serialFilters).catch((e) => {
+        const port = await findOrPickSerialPort(req.device.serialFilters, cb).catch((e) => {
           // No serial port picked: the board may already be in bootloader mode
           // (it has no serial port then), so go straight to the DFU picker.
           if (e instanceof DOMException && e.name === "NotFoundError") return undefined;
@@ -109,13 +116,31 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
             port.addEventListener("disconnect", () => resolve(true), { once: true });
             setTimeout(() => resolve(false), 3000);
           });
-          await touch1200(port);
+          try {
+            await touch1200(port);
+          } catch (e) {
+            // On Windows, opening at 1200 baud can restart the board (UNO R4)
+            // before open() returns, so open() fails although the reset worked.
+            // The port vanishing tells the two apart.
+            if (await left) {
+              cb.log("The board restarted into its bootloader.");
+            } else {
+              // Really couldn't open it (busy, e.g. open in another app): let the
+              // user enter the bootloader by hand and continue.
+              cb.log(`Couldn't reset the board automatically (${e instanceof Error ? e.message : String(e)}).`);
+              throw new NeedsUserGesture(
+                `${req.device.resetHint ?? "Double-tap the RESET button on the board to put it in bootloader mode (the LED fades in and out)."} ` +
+                  `Then click Continue and select "${req.device.bootloaderName ?? "DFU device"}" in the browser's list.`,
+              );
+            }
+          }
           cb.log("Waiting for the bootloader to enumerate…");
           if (!(await left)) {
-            throw new Error(
-              "The board didn't restart into its bootloader: its serial port is still there. " +
-                (req.device.resetHint ?? "Its firmware may not support the 1200 baud reset.") +
-                ' Put it in bootloader mode by hand, then use "Board is already in bootloader".',
+            // The reset may still have worked without the browser reporting the
+            // disconnect: look for the bootloader anyway instead of giving up.
+            cb.log(
+              "The serial port didn't report a restart; looking for the bootloader anyway. If nothing is found: " +
+                `${req.device.resetHint ?? "Double-tap RESET on the board."} Then use "Board is already in bootloader".`,
             );
           }
           await sleep(1000);

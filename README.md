@@ -34,11 +34,7 @@ Users can also upload their own file for any board.
 | ST DfuSe | STM32 ROM bootloader, GIGA R1 | WebUSB |
 | UF2 drive | RP2040 | File System Access (download fallback) |
 
-## 3. Batch flashing
-
-Tick the checkbox next to each board (or click **All**). Plug in the board that's highlighted and press **Flash**. When it finishes, the next board is highlighted. For security, the browser makes the user pick the port for each board, so every board needs one click.
-
 ## Known limitations
-- **STM32 on Windows:** the ROM DFU device needs the WinUSB driver (install it once with Zadig) before WebUSB can open it.
+- **USB bootloaders on Windows** (STM32, GIGA R1, UNO R4 Minima, Pico): the bootloader needs the WinUSB driver before WebUSB can open it. When a flash can't find or open the board, the page offers the driver installer (`public/drivers/ChordsDriverSetup.exe`), with Zadig as the alternative.
 - **RP2040:** Chrome may refuse to open some drive roots. If it does, the page downloads the `.uf2` so you can drag it onto RPI-RP2.
 - **Safari and Firefox:** these browsers don't have Web Serial or WebUSB.

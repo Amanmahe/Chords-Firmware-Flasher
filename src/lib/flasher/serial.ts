@@ -1,3 +1,5 @@
+import type { FlashCallbacks } from "./types";
+
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export class TimeoutError extends Error {
@@ -20,7 +22,7 @@ export class SerialIO {
   constructor(public readonly port: SerialPort) {}
 
   async open(baudRate: number) {
-    await this.port.open({ baudRate, bufferSize: 16384 });
+    await openPort(this.port, { baudRate, bufferSize: 16384 });
     this.buf = [];
     this.loop = this.readLoop();
   }
@@ -123,15 +125,20 @@ export class SerialIO {
 }
 
 /** Ask for a serial port (must run inside a click handler). */
-export async function pickSerialPort(filters?: SerialPortFilter[]) {
+export async function pickSerialPort(filters?: SerialPortFilter[], cb?: FlashCallbacks) {
   if (!("serial" in navigator)) {
     throw new Error("Web Serial is not available. Use Chrome, Edge or Opera on desktop.");
   }
-  return navigator.serial.requestPort(filters ? { filters } : {});
+  cb?.pickerOpen?.(true, "serial");
+  try {
+    return await navigator.serial.requestPort(filters ? { filters } : {});
+  } finally {
+    cb?.pickerOpen?.(false, "serial");
+  }
 }
 
 /** Reuse the one already-granted port matching `filters`; otherwise ask. */
-export async function findOrPickSerialPort(filters?: SerialPortFilter[]) {
+export async function findOrPickSerialPort(filters?: SerialPortFilter[], cb?: FlashCallbacks) {
   if (filters?.length && "serial" in navigator) {
     const ports = (await navigator.serial.getPorts()).filter((p) => {
       const i = p.getInfo();
@@ -143,7 +150,24 @@ export async function findOrPickSerialPort(filters?: SerialPortFilter[]) {
     });
     if (ports.length === 1) return ports[0];
   }
-  return pickSerialPort(filters);
+  return pickSerialPort(filters, cb);
+}
+
+/**
+ * Open a serial port. Windows keeps a COM port busy for a moment after it was
+ * closed (e.g. by a serial monitor just before flashing, or between two baud
+ * rates), so the first open can fail: retry briefly.
+ */
+async function openPort(port: SerialPort, options: SerialOptions) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await port.open(options);
+      return;
+    } catch (e) {
+      if (attempt >= 10 || !(e instanceof DOMException && e.name === "NetworkError")) throw e;
+      await sleep(300);
+    }
+  }
 }
 
 /**
@@ -151,7 +175,7 @@ export async function findOrPickSerialPort(filters?: SerialPortFilter[]) {
  * closing it makes the board jump into its bootloader.
  */
 export async function touch1200(port: SerialPort) {
-  await port.open({ baudRate: 1200 });
+  await openPort(port, { baudRate: 1200 });
   try {
     await port.setSignals({ dataTerminalReady: false });
   } catch {}

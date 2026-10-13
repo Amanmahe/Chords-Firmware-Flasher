@@ -33,8 +33,12 @@ export interface DeviceDef {
   pageSize?: number;
   /** ESP32: baud used after the stub is loaded. */
   espBaud?: number;
+  /** ESP32: expected chip (e.g. "ESP32-C6"); flashing stops if another chip answers. */
+  espChip?: string;
   /** WebUSB filters for the bootloader (DFU) device. */
   usbFilters?: USBDeviceFilter[];
+  /** How the bootloader is named in the browser's USB device list, e.g. "Giga". */
+  bootloaderName?: string;
   /** DfuSe: start address of the application. */
   dfuseAddress?: number;
   /** Open the running sketch's serial port at 1200 baud to jump to the bootloader first. */
@@ -51,6 +55,8 @@ export interface DeviceDef {
 export interface FlashCallbacks {
   log: (msg: string) => void;
   progress: (percent: number, label?: string) => void;
+  /** The browser's device list opened (true) or closed (false): "usb" for a bootloader, "serial" for a port. */
+  pickerOpen?: (open: boolean, list: "usb" | "serial") => void;
 }
 
 export interface FlashJob {

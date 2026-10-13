@@ -15,6 +15,7 @@ import {
   type DeviceDef,
 } from "@/lib/flasher";
 import { DeviceList, type DeviceStatus } from "./DeviceList";
+import { DriverHelp } from "./DriverHelp";
 import { Bolt, Upload } from "./icons";
 import { SavedFirmware } from "./SavedFirmware";
 
@@ -22,30 +23,21 @@ type LogLine = { t: string; msg: string; kind: "info" | "ok" | "err" | "warn" };
 
 const now = () => new Date().toLocaleTimeString([], { hour12: false });
 
-/**
- * The page is laid out once at this width and scaled to fit the window, so it
- * looks the same on every screen and at every browser zoom level (zooming
- * changes the window's CSS width, and the scale follows it).
- */
-const DESIGN_WIDTH = 1920;
+const isWindows = () => typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent);
 
-function useFitToWindow() {
-  const [fit, setFit] = useState<{ scale: number; height: number } | null>(null);
-  useEffect(() => {
-    const update = () => {
-      const scale = window.innerWidth / DESIGN_WIDTH;
-      setFit({ scale, height: window.innerHeight / scale });
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-  return fit;
+/** On Windows, a USB flash that waits this long usually means the board's driver is missing. */
+const DRIVER_WAIT_MS = 15000;
+
+/** Thrown into a running flash when the user stops it. */
+class FlashCancelled extends Error {
+  constructor() {
+    super("Flashing stopped");
+    this.name = "FlashCancelled";
+  }
 }
 
 export default function Flasher() {
   const [activeId, setActiveId] = useState(DEVICES[0].id);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState<Record<string, DeviceStatus>>({});
   const [files, setFiles] = useState<Record<string, File | null>>({});
   const [espAddr, setEspAddr] = useState("0x0");
@@ -56,8 +48,21 @@ export default function Flasher() {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [support, setSupport] = useState({ serial: true, usb: true, fsAccess: true });
   const [downloading, setDownloading] = useState(false);
+  // What to do next while a board waits (usually in its bootloader) for Continue.
+  const [waiting, setWaiting] = useState<{ id: string; msg: string } | null>(null);
+  // Windows couldn't find / open a USB bootloader: it needs the WinUSB driver.
+  const [needsWinUsb, setNeedsWinUsb] = useState(false);
+  // Why the driver steps are shown, when it isn't obvious from the log.
+  const [driverReason, setDriverReason] = useState<string | null>(null);
+  // The driver steps dialog: opens by itself when the driver is found missing.
+  const [driverOpen, setDriverOpen] = useState(false);
+  // The running flash, so Stop can end it.
+  const runningRef = useRef<{ abort: AbortController; device: DeviceDef } | null>(null);
+  // Fires when the browser's USB list stays open without a pick.
+  const pickerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Fires when a USB flash shows no progress (time in a device list not counted).
+  const stallTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
-  const fit = useFitToWindow();
 
   useEffect(() => setSupport(browserSupport()), []);
   useEffect(() => {
@@ -70,20 +75,56 @@ export default function Flasher() {
     [],
   );
 
-  // Batch queue: selected devices, in list order, not yet flashed OK
-  const queue = DEVICES.filter((d) => selected.has(d.id));
-  const pending = queue.filter((d) => status[d.id] !== "done");
-  const nextInBatch = pending[0];
-
   const setDevStatus = (id: string, s: DeviceStatus) => setStatus((m) => ({ ...m, [id]: s }));
+
+  const showDriverHelp = (reason?: string) => {
+    setNeedsWinUsb(true);
+    if (reason) setDriverReason(reason);
+    setDriverOpen(true);
+  };
+
+  const clearPickerTimer = () => {
+    if (pickerTimerRef.current) clearTimeout(pickerTimerRef.current);
+    pickerTimerRef.current = null;
+  };
+  const clearStallTimer = () => {
+    if (stallTimerRef.current) clearTimeout(stallTimerRef.current);
+    stallTimerRef.current = null;
+  };
 
   const runFlash = async (device: DeviceDef, opts: { skipTouch?: boolean } = {}) => {
     if (busy) return;
+    const abort = new AbortController();
+    runningRef.current = { abort, device };
+    const checkCancelled = () => {
+      if (abort.signal.aborted) throw new FlashCancelled();
+    };
     setActiveId(device.id);
     setBusy(true);
+    setWaiting(null);
+    setDriverReason(null);
     setProgress({ pct: 0, label: "Starting" });
     setDevStatus(device.id, "flashing");
     log(`── ${device.name} ──`, "warn");
+
+    // Windows, USB bootloader: no progress for a while (outside a device
+    // list) usually means the driver is missing and the board never answers.
+    // Long enough for a reset into the bootloader (~9 s).
+    const windows = isWindows();
+    const watchStall = windows && needsApi(device) === "usb";
+    let started = false;
+    const armStall = () => {
+      clearStallTimer();
+      if (!watchStall || started) return;
+      stallTimerRef.current = setTimeout(() => {
+        if (abort.signal.aborted) return;
+        const reason =
+          "Flashing hasn't started after 15 seconds. This PC most likely doesn't have the USB driver for this board.";
+        showDriverHelp(reason);
+        log(`${reason} Run the driver installer from "USB driver help", then press Flash again.`, "warn");
+      }, DRIVER_WAIT_MS);
+    };
+    armStall();
 
     const addr = parseInt(espAddr, 16);
     try {
@@ -97,27 +138,67 @@ export default function Flasher() {
           skipTouch: opts.skipTouch,
         },
         {
-          log: (m) => log(m),
-          progress: (pct, label) => setProgress({ pct: Math.max(0, Math.min(100, pct)), label: label ?? "" }),
+          // Throwing here stops the flasher at its next step; each one closes
+          // the port / USB device on the way out.
+          log: (m) => {
+            checkCancelled();
+            log(m);
+          },
+          progress: (pct, label) => {
+            checkCancelled();
+            if (pct > 0 && !started) {
+              started = true;
+              clearStallTimer();
+            }
+            setProgress({ pct: Math.max(0, Math.min(100, pct)), label: label ?? "" });
+          },
+          pickerOpen: (open, list) => {
+            clearPickerTimer();
+            // Choosing in a list isn't a stall: pause, then restart after it.
+            if (!open) {
+              setProgress((p) => p && { ...p, label: "Connecting" });
+              return armStall();
+            }
+            clearStallTimer();
+            setProgress((p) => p && { ...p, label: "Waiting for you to select the board" });
+            if (list !== "usb") return;
+            // Nothing picked within 15 s usually means the bootloader isn't
+            // listed: on Windows, its driver is missing.
+            pickerTimerRef.current = setTimeout(() => {
+              if (abort.signal.aborted) return;
+              showDriverHelp("No board was selected within 15 seconds. If it isn't in the list, this PC needs the USB driver.");
+              log(
+                windows
+                  ? `No board selected yet. If it isn't in the list, or selecting it fails, Windows needs the USB driver: see "USB driver help".`
+                  : "No board selected yet. If it isn't in the list, make sure it's in bootloader mode, then replug it.",
+                "warn",
+              );
+            }, DRIVER_WAIT_MS);
+          },
         },
       );
+      checkCancelled();
       setProgress({ pct: 100, label: "Done" });
       setDevStatus(device.id, "done");
-      log(`${device.name} flashed successfully`, "ok");
-
-      // advance the batch
-      const rest = DEVICES.filter((d) => selected.has(d.id) && d.id !== device.id && status[d.id] !== "done");
-      if (rest.length) {
-        setActiveId(rest[0].id);
-        log(`Next: connect ${rest[0].name} and press Flash.`, "warn");
+      // A USB bootloader answered, so this PC has its driver now.
+      if (needsApi(device) === "usb") {
+        setNeedsWinUsb(false);
+        setDriverOpen(false);
       }
+      log(`${device.name} flashed successfully`, "ok");
     } catch (e) {
+      // Stop already reset the page; ignore whatever the stopped flash threw.
+      if (abort.signal.aborted) return;
       if (e instanceof NeedsUserGesture) {
         setDevStatus(device.id, "waiting");
+        setWaiting({ id: device.id, msg: e.message });
         log(e.message, "warn");
       } else {
         const msg = e instanceof Error ? e.message : String(e);
         setDevStatus(device.id, "error");
+        if (/Windows is using a driver the browser can't open|only lists a bootloader that has the WinUSB driver/.test(msg)) {
+          showDriverHelp();
+        }
         log(
           /No port selected|No device selected|NotFoundError|aborted a request/i.test(msg)
             ? "Cancelled: no device was selected."
@@ -127,17 +208,47 @@ export default function Flasher() {
       }
       setProgress(null);
     } finally {
-      setBusy(false);
+      clearPickerTimer();
+      clearStallTimer();
+      if (runningRef.current?.abort === abort) {
+        runningRef.current = null;
+        setBusy(false);
+      }
     }
   };
 
-  const toggle = (id: string) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
+  // A board that waits for Continue is already in its bootloader: skip the reset.
+  const flash = (device: DeviceDef) => runFlash(device, { skipTouch: status[device.id] === "waiting" });
+
+  // Stop a running flash. The board may be left in its bootloader, which
+  // every supported board recovers from by flashing again.
+  const cancelFlash = () => {
+    const running = runningRef.current;
+    if (!running) return;
+    const { abort, device } = running;
+    abort.abort();
+    runningRef.current = null;
+    clearPickerTimer();
+    clearStallTimer();
+    // A step waiting on the device (no answer, or mid-transfer) only ends
+    // when the device is closed.
+    const filters = device.usbFilters;
+    if (filters && "usb" in navigator) {
+      navigator.usb.getDevices().then((devs) =>
+        devs
+          .filter(
+            (d) =>
+              d.opened &&
+              filters.some((f) => f.vendorId === d.vendorId && (f.productId === undefined || f.productId === d.productId)),
+          )
+          .forEach((d) => d.close().catch(() => {})),
+      );
+    }
+    setBusy(false);
+    setProgress(null);
+    setDevStatus(device.id, "idle");
+    log("Stopped. If the board stays in bootloader mode, press Flash again or replug it.", "warn");
+  };
 
   const api = needsApi(active);
   const apiMissing =
@@ -148,340 +259,313 @@ export default function Flasher() {
   const flashTarget = active;
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-neutral-950">
-      <div
-        className="flex flex-col text-neutral-100"
-        style={{
-          width: DESIGN_WIDTH,
-          height: fit?.height ?? "100vh",
-          zoom: fit?.scale ?? 1,
-          visibility: fit ? "visible" : "hidden",
-        }}
-      >
-        <header className="shrink-0 border-b border-neutral-800 px-6 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Bolt className="h-5 w-5 text-blue-400" />
-              <h1 className="text-lg font-semibold">Chords Firmware Flasher</h1>
-            </div>
-            <p className="text-sm text-neutral-400">Chrome · Edge · Opera (desktop)</p>
+    // One screen that never scrolls: sizes are in rem and the root font size
+    // follows the window (globals.css), so the whole layout scales as one.
+    <div className="flex h-dvh flex-col overflow-hidden bg-neutral-950 text-neutral-100">
+      <header className="shrink-0 border-b border-neutral-800 px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Bolt className="h-5 w-5 text-blue-400" />
+            <h1 className="text-lg font-semibold">Chords Firmware Flasher</h1>
           </div>
-        </header>
-
-        {(!support.serial || !support.usb) && (
-          <div className="mt-4 shrink-0 px-6">
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          {/* In the header rather than a banner, so the screen keeps its height. */}
+          {support.serial && support.usb ? (
+            <p className="text-sm text-neutral-400">Chrome · Edge · Opera (desktop)</p>
+          ) : (
+            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-sm text-amber-200">
               This browser is missing {!support.serial && "Web Serial"}
               {!support.serial && !support.usb && " and "}
               {!support.usb && "WebUSB"}. Open this page in desktop Chrome or Edge over HTTPS (or localhost).
-            </div>
+            </p>
+          )}
+        </div>
+      </header>
+
+      <main className="grid min-h-0 flex-1 grid-cols-[20.5rem_minmax(0,1fr)_23rem] grid-rows-[minmax(0,1fr)] gap-6 p-6">
+        {/* ------------------------------------------------ device list */}
+        <aside className="flex min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 pl-4">
+          <div className="mb-2 shrink-0 px-1">
+            <span className="text-xs font-medium uppercase tracking-wider text-neutral-400">Devices</span>
           </div>
-        )}
+          <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
+            <DeviceList devices={DEVICES} activeId={activeId} status={status} onActivate={setActiveId} />
+          </div>
+        </aside>
 
-        {/* Three columns laid out at DESIGN_WIDTH; each column scrolls on its own. */}
-        <main className="grid min-h-0 flex-1 grid-cols-[374px_minmax(0,1fr)_448px] grid-rows-[minmax(0,1fr)] gap-6 p-6">
-          {/* ------------------------------------------------ device list */}
-          <aside className="flex min-h-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-3 pl-4">
-            <div className="mb-2 flex shrink-0 items-center justify-between px-1">
-              <span className="text-xs font-medium uppercase tracking-wider text-neutral-400">
-                Devices · {selected.size} in batch
+        {/* ------------------------------------------------ detail panel */}
+        <section className="flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto">
+          <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-xl font-semibold">{active.name}</h2>
+                <p className="mt-1 text-sm text-neutral-400">{active.family}</p>
+              </div>
+              <span className="rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1 text-xs text-neutral-300">
+                {PROTOCOL_LABEL[active.protocol]}
               </span>
-              <div className="flex gap-2 text-xs">
-                <button
-                  disabled={busy}
-                  onClick={() => setSelected(new Set(DEVICES.map((d) => d.id)))}
-                  className="text-blue-400 hover:underline disabled:opacity-40"
-                >
-                  All
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    setSelected(new Set());
-                    setStatus({});
-                  }}
-                  className="text-neutral-400 hover:underline disabled:opacity-40"
-                >
-                  Clear
-                </button>
-              </div>
             </div>
-            <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
-              <DeviceList
-                devices={DEVICES}
-                activeId={activeId}
-                selected={selected}
-                status={status}
-                busy={busy}
-                onActivate={setActiveId}
-                onToggle={toggle}
-                onQuickFlash={(id) => runFlash(DEVICES.find((d) => d.id === id)!)}
-              />
-            </div>
-          </aside>
 
-          {/* ------------------------------------------------ detail panel */}
-          <section className="flex min-h-0 min-w-0 flex-col gap-5 overflow-y-auto">
-            {queue.length > 0 && (
-              <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-4">
-                <div className="mb-2 flex items-center justify-between text-sm">
-                  <span className="font-medium">Batch</span>
-                  <span className="text-neutral-400">
-                    {queue.length - pending.length} / {queue.length} flashed
-                  </span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-neutral-800">
-                  <div
-                    className="h-full bg-green-500 transition-all"
-                    style={{ width: `${((queue.length - pending.length) / queue.length) * 100}%` }}
-                  />
-                </div>
-                <p className="mt-2 text-sm text-neutral-400">
-                  {nextInBatch
-                    ? `Next: plug in ${nextInBatch.name}, then press Flash. Each board needs one click because the browser asks you to pick the port.`
-                    : "All selected boards are flashed."}
-                </p>
-              </div>
-            )}
+            <ol className="mt-4 list-decimal space-y-1 pl-5 text-sm text-neutral-300">
+              {active.instructions.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ol>
 
-            <div className="rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold">{active.name}</h2>
-                  <p className="mt-1 text-sm text-neutral-400">{active.family}</p>
-                </div>
-                <span className="rounded-full border border-neutral-700 bg-neutral-800 px-3 py-1 text-xs text-neutral-300">
-                  {PROTOCOL_LABEL[active.protocol]}
-                </span>
-              </div>
-
-              <ol className="mt-4 list-decimal space-y-1 pl-5 text-sm text-neutral-300">
-                {active.instructions.map((s, i) => (
-                  <li key={i}>{s}</li>
-                ))}
-              </ol>
-
-              {/* firmware source */}
-              <div className="mt-5">
-                <p className="mb-2 text-sm font-medium">Firmware</p>
-                <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 px-4 py-3 text-sm hover:border-neutral-500">
-                  <Upload className="h-4 w-4 shrink-0 text-neutral-400" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {customFile ? (
-                      <>
-                        <span className="text-neutral-100">{customFile.name}</span>{" "}
-                        <span className="text-neutral-500">({(customFile.size / 1024).toFixed(1)} KB)</span>
-                      </>
-                    ) : active.firmware.length ? (
-                      <span className="text-neutral-400">
-                        Latest release:{" "}
-                        <code className="text-neutral-300">{active.firmware.map((f) => f.url.split("/").pop()).join(", ")}</code>
-                        <span className="text-neutral-500"> · click to use your own file ({active.accept})</span>
-                      </span>
-                    ) : (
-                      <span className="text-neutral-400">Choose a firmware file ({active.accept})</span>
-                    )}
-                  </span>
-                  <input
-                    type="file"
-                    accept={active.accept}
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] ?? null;
-                      setFiles((m) => ({ ...m, [active.id]: f }));
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                  {customFile && (
-                    <button
-                      onClick={() => setFiles((m) => ({ ...m, [active.id]: null }))}
-                      className="text-neutral-400 hover:text-neutral-200 hover:underline"
-                    >
-                      Use the latest release instead
-                    </button>
+            {/* firmware source */}
+            <div className="mt-5">
+              <p className="mb-2 text-sm font-medium">Firmware</p>
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 px-4 py-3 text-sm hover:border-neutral-500">
+                <Upload className="h-4 w-4 shrink-0 text-neutral-400" />
+                <span className="min-w-0 flex-1 break-words">
+                  {customFile ? (
+                    <>
+                      <span className="text-neutral-100">{customFile.name}</span>{" "}
+                      <span className="text-neutral-500">({(customFile.size / 1024).toFixed(1)} KB)</span>
+                    </>
+                  ) : active.firmware.length ? (
+                    <span className="text-neutral-400">
+                      Latest release:{" "}
+                      <code className="text-neutral-300">{active.firmware.map((f) => f.url.split("/").pop()).join(", ")}</code>
+                      <span className="text-neutral-500"> · click to use your own file ({active.accept})</span>
+                    </span>
+                  ) : (
+                    <span className="text-neutral-400">Choose a firmware file ({active.accept})</span>
                   )}
-                  {active.firmware.map((f) => (
-                    <button
-                      key={f.url}
-                      disabled={downloading || busy}
-                      onClick={async () => {
-                        const name = fileNameOf(f.url);
-                        setDownloading(true);
-                        try {
-                          const { version } = await downloadFirmware(f.url);
-                          log(`Saved ${name}${version ? ` (${version})` : ""} in this browser.`, "ok");
-                        } catch (e) {
-                          log(`Couldn't download ${name}: ${e instanceof Error ? e.message : e}`, "err");
-                        } finally {
-                          setDownloading(false);
-                        }
-                      }}
-                      className="text-blue-400 hover:text-blue-300 hover:underline disabled:opacity-50"
-                      title="Download the latest release and keep it in this browser"
-                    >
-                      {downloading ? "Downloading…" : `Download ${fileNameOf(f.url)}`}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* options */}
-              <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
-                {active.protocol === "esptool" ? (
-                  <>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={eraseAll} onChange={(e) => setEraseAll(e.target.checked)} className="accent-blue-500" />
-                      Erase entire flash first
-                    </label>
-                    {customFile && (
-                      <label className="flex items-center gap-2">
-                        Offset
-                        <input
-                          value={espAddr}
-                          onChange={(e) => setEspAddr(e.target.value)}
-                          className="w-24 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
-                        />
-                        <span className="text-xs text-neutral-500">0x0 for merged images, 0x10000 for app-only</span>
-                      </label>
-                    )}
-                  </>
-                ) : (
-                  active.protocol !== "uf2" &&
-                  active.protocol !== "dfu" &&
-                  active.protocol !== "dfuse" && (
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} className="accent-blue-500" />
-                      Verify after writing
-                    </label>
-                  )
-                )}
-              </div>
-
-              {/* actions */}
-              <div className="mt-6 flex flex-wrap gap-3">
-                <button
-                  disabled={busy || apiMissing}
-                  onClick={() => runFlash(flashTarget, { skipTouch: status[flashTarget.id] === "waiting" })}
-                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Bolt />
-                  {busy ? "Flashing…" : `Flash ${flashTarget.name}`}
-                </button>
-
-                {isDfuTouch && (
+                </span>
+                <input
+                  type="file"
+                  accept={active.accept}
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setFiles((m) => ({ ...m, [active.id]: f }));
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                {customFile && (
                   <button
-                    disabled={busy}
-                    onClick={() => runFlash(active, { skipTouch: true })}
-                    className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
-                    title="Use this after double-tapping RESET"
+                    onClick={() => setFiles((m) => ({ ...m, [active.id]: null }))}
+                    className="text-neutral-400 hover:text-neutral-200 hover:underline"
                   >
-                    Board is already in bootloader
+                    Use the latest release instead
                   </button>
                 )}
+                {active.firmware.map((f) => (
+                  <button
+                    key={f.url}
+                    disabled={downloading || busy}
+                    onClick={async () => {
+                      const name = fileNameOf(f.url);
+                      setDownloading(true);
+                      try {
+                        const { version } = await downloadFirmware(f.url);
+                        log(`Saved ${name}${version ? ` (${version})` : ""} in this browser.`, "ok");
+                      } catch (e) {
+                        log(`Couldn't download ${name}: ${e instanceof Error ? e.message : e}`, "err");
+                      } finally {
+                        setDownloading(false);
+                      }
+                    }}
+                    className="text-blue-400 hover:text-blue-300 hover:underline disabled:opacity-50"
+                    title="Download the latest release and keep it in this browser"
+                  >
+                    {downloading ? "Downloading…" : `Download ${fileNameOf(f.url)}`}
+                  </button>
+                ))}
+              </div>
+            </div>
 
+            {/* options */}
+            <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+              {active.protocol === "esptool" ? (
+                <>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={eraseAll} onChange={(e) => setEraseAll(e.target.checked)} className="h-4 w-4 accent-blue-500" />
+                    Erase entire flash first
+                  </label>
+                  {customFile && (
+                    <label className="flex flex-wrap items-center gap-2">
+                      Offset
+                      <input
+                        value={espAddr}
+                        onChange={(e) => setEspAddr(e.target.value)}
+                        className="w-24 rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1 font-mono text-xs"
+                      />
+                      <span className="text-xs text-neutral-500">0x0 for merged images, 0x10000 for app-only</span>
+                    </label>
+                  )}
+                </>
+              ) : (
+                active.protocol !== "uf2" &&
+                active.protocol !== "dfu" &&
+                active.protocol !== "dfuse" && (
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={verify} onChange={(e) => setVerify(e.target.checked)} className="h-4 w-4 accent-blue-500" />
+                    Verify after writing
+                  </label>
+                )
+              )}
+            </div>
+
+            {/* actions */}
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                disabled={busy || apiMissing}
+                onClick={() => flash(flashTarget)}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Bolt />
+                {busy ? "Flashing…" : status[flashTarget.id] === "waiting" ? "Continue" : `Flash ${flashTarget.name}`}
+              </button>
+
+              {busy && (
+                <button
+                  onClick={cancelFlash}
+                  className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800"
+                  title="Stop the running flash"
+                >
+                  Stop
+                </button>
+              )}
+
+              {isDfuTouch && (
                 <button
                   disabled={busy}
+                  onClick={() => runFlash(active, { skipTouch: true })}
+                  className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
+                  title="Use this after double-tapping RESET"
+                >
+                  Board is already in bootloader
+                </button>
+              )}
+
+              <button
+                disabled={busy}
+                onClick={async () => {
+                  try {
+                    const { usb, serial } = await forgetDevices();
+                    setStatus((m) => Object.fromEntries(Object.entries(m).filter(([, v]) => v !== "waiting")));
+                    log(
+                      `Forgot ${usb} USB device(s) and ${serial} serial port(s). The next flash will ask for them again. ` +
+                        "Old entries still shown in the browser's device list disappear after restarting the browser.",
+                      "warn",
+                    );
+                  } catch (e) {
+                    log(`Error: ${e instanceof Error ? e.message : e}`, "err");
+                  }
+                }}
+                className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
+                title="Remove this site's access to all boards it remembers"
+              >
+                Forget devices
+              </button>
+
+              {needsWinUsb && needsApi(active) === "usb" && isWindows() && (
+                <button
+                  onClick={() => setDriverOpen(true)}
+                  className="rounded-lg border border-amber-500/40 px-4 py-2.5 text-sm text-amber-200 hover:bg-amber-500/10"
+                >
+                  USB driver help
+                </button>
+              )}
+
+              {active.protocol === "uf2" && (
+                <button
+                  disabled={busy || !support.serial}
                   onClick={async () => {
                     try {
-                      const { usb, serial } = await forgetDevices();
-                      setStatus((m) => Object.fromEntries(Object.entries(m).filter(([, v]) => v !== "waiting")));
-                      log(
-                        `Forgot ${usb} USB device(s) and ${serial} serial port(s). The next flash will ask for them again. ` +
-                          "Old entries still shown in the browser's device list disappear after restarting the browser.",
-                        "warn",
-                      );
+                      await resetToBootloader();
+                      log("Reset sent. Wait for the RPI-RP2 drive, then press Flash.", "warn");
                     } catch (e) {
                       log(`Error: ${e instanceof Error ? e.message : e}`, "err");
                     }
                   }}
                   className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
-                  title="Remove this site's access to all boards it remembers"
                 >
-                  Forget devices
+                  Reset to BOOTSEL
                 </button>
-
-                {active.protocol === "uf2" && (
-                  <button
-                    disabled={busy || !support.serial}
-                    onClick={async () => {
-                      try {
-                        await resetToBootloader();
-                        log("Reset sent. Wait for the RPI-RP2 drive, then press Flash.", "warn");
-                      } catch (e) {
-                        log(`Error: ${e instanceof Error ? e.message : e}`, "err");
-                      }
-                    }}
-                    className="rounded-lg border border-neutral-700 px-4 py-2.5 text-sm hover:bg-neutral-800 disabled:opacity-50"
-                  >
-                    Reset to BOOTSEL
-                  </button>
-                )}
-              </div>
-
-              {/* progress */}
-              {progress && (
-                <div className="mt-5">
-                  <div className="mb-1.5 flex justify-between text-xs text-neutral-400">
-                    <span>{progress.label}</span>
-                    <span className="tabular-nums">{progress.pct.toFixed(0)}%</span>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
-                    <div
-                      className={`h-full transition-[width] duration-150 ${progress.pct >= 100 ? "bg-green-500" : "bg-blue-500"}`}
-                      style={{ width: `${progress.pct}%` }}
-                    />
-                  </div>
-                </div>
               )}
             </div>
 
-            {/* log */}
-            <div className="flex min-h-[9rem] flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60">
-              <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-2">
-                <span className="text-sm font-medium">Log</span>
-                <div className="flex gap-3 text-xs text-neutral-400">
-                  <button
-                    onClick={() => navigator.clipboard.writeText(logs.map((l) => `[${l.t}] ${l.msg}`).join("\n"))}
-                    className="hover:text-neutral-200"
-                  >
-                    Copy
-                  </button>
-                  <button onClick={() => setLogs([])} className="hover:text-neutral-200">
-                    Clear
-                  </button>
+            {/* progress */}
+            {progress && (
+              <div className="mt-5">
+                <div className="mb-1.5 flex justify-between text-xs text-neutral-400">
+                  <span>{progress.label}</span>
+                  <span className="tabular-nums">{progress.pct.toFixed(0)}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-neutral-800">
+                  <div
+                    className={`h-full transition-[width] duration-150 ${progress.pct >= 100 ? "bg-green-500" : "bg-blue-500"}`}
+                    style={{ width: `${progress.pct}%` }}
+                  />
                 </div>
               </div>
-              <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-xs leading-relaxed break-words">
-                {logs.length === 0 ? (
-                  <p className="text-neutral-500">Select a board and press Flash.</p>
-                ) : (
-                  logs.map((l, i) => (
-                    <div
-                      key={i}
-                      className={
-                        l.kind === "err"
-                          ? "text-red-400"
-                          : l.kind === "ok"
-                            ? "text-green-400"
-                            : l.kind === "warn"
-                              ? "text-amber-300"
-                              : "text-neutral-300"
-                      }
-                    >
-                      <span className="text-neutral-600">[{l.t}]</span> {l.msg}
-                    </div>
-                  ))
-                )}
+            )}
+
+            {status[active.id] === "waiting" && waiting?.id === active.id && (
+              <div className="mt-5 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm">
+                <p className="font-medium text-blue-200">Next step</p>
+                <p className="mt-0.5 text-neutral-300">{waiting.msg}</p>
+              </div>
+            )}
+          </div>
+
+          {/* log */}
+          <div className="flex min-h-[8rem] flex-1 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60">
+            <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-2">
+              <span className="text-sm font-medium">Log</span>
+              <div className="flex gap-3 text-xs text-neutral-400">
+                <button
+                  onClick={() => navigator.clipboard.writeText(logs.map((l) => `[${l.t}] ${l.msg}`).join("\n"))}
+                  className="hover:text-neutral-200"
+                >
+                  Copy
+                </button>
+                <button onClick={() => setLogs([])} className="hover:text-neutral-200">
+                  Clear
+                </button>
               </div>
             </div>
-          </section>
+            <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 font-mono text-xs leading-relaxed break-words">
+              {logs.length === 0 ? (
+                <p className="text-neutral-500">Select a board and press Flash.</p>
+              ) : (
+                logs.map((l, i) => (
+                  <div
+                    key={i}
+                    className={
+                      l.kind === "err"
+                        ? "text-red-400"
+                        : l.kind === "ok"
+                          ? "text-green-400"
+                          : l.kind === "warn"
+                            ? "text-amber-300"
+                            : "text-neutral-300"
+                    }
+                  >
+                    <span className="text-neutral-600">[{l.t}]</span> {l.msg}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </section>
 
-          {/* ------------------------------------------------ saved firmware */}
-          <SavedFirmware activeFiles={active.firmware.map((f) => fileNameOf(f.url))} busy={busy} log={log} />
-        </main>
-      </div>
+        {/* ------------------------------------------------ saved firmware */}
+        <SavedFirmware
+          className="min-w-0"
+          activeFiles={active.firmware.map((f) => fileNameOf(f.url))}
+          busy={busy}
+          log={log}
+        />
+      </main>
+
+      {driverOpen && needsApi(active) === "usb" && isWindows() && (
+        <DriverHelp device={active} reason={driverReason} onClose={() => setDriverOpen(false)} />
+      )}
     </div>
   );
 }

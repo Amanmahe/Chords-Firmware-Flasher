@@ -34,13 +34,6 @@ export const Spinner = ({ className = "h-5 w-5" }: P) => (
   </svg>
 );
 
-export const Reflash = ({ className = "h-4 w-4" }: P) => (
-  <svg viewBox="0 0 20 20" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M16 10a6 6 0 01-10.4 4.1M4 10a6 6 0 0110.4-4.1" />
-    <path d="M14.8 2.8v3.3h-3.3M5.2 17.2v-3.3h3.3" />
-  </svg>
-);
-
 export const Bolt = ({ className = "h-4 w-4" }: P) => (
   <svg viewBox="0 0 20 20" className={className} fill="currentColor" aria-hidden>
     <path d="M11.3 1.5L3.5 11h5l-1 7.5L16.5 9h-5l-.2-7.5z" />
