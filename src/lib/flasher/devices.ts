@@ -20,7 +20,7 @@ import type { DeviceDef } from "./types";
  * Override with NEXT_PUBLIC_FIRMWARE_BASE, e.g. to pin a tag: ".../firmware/v1.0.4".
  */
 export const FIRMWARE_BASE =
-  process.env.NEXT_PUBLIC_FIRMWARE_BASE ?? "https://mute-union-1cca.amanmaheshwari715.workers.dev/firmware/latest";
+  process.env.NEXT_PUBLIC_FIRMWARE_BASE ?? "https://chords-arduino-firmware.myupsidedownlab.workers.dev/firmware/latest";
 const release = (file: string) => `${FIRMWARE_BASE}/${file}`;
 
 const ARDUINO_VID = 0x2341;
@@ -205,9 +205,10 @@ export const DEVICES: DeviceDef[] = [
     protocol: "stk500v1",
     firmware: [{ url: release("Chords-UNO-R3.bin"), address: 0 }],
     accept: ".hex,.bin",
-    baudRates: [115200],
+    // Clones with the old bootloader answer at 57600.
+    baudRates: [115200, 57600],
     pageSize: 128,
-    instructions: AVR_STEPS,
+    instructions: [...AVR_STEPS, "CH340 clones need the CH340 driver on Windows and older macOS."],
   },
   {
     id: "avr-genuino-uno",
@@ -221,17 +222,6 @@ export const DEVICES: DeviceDef[] = [
     instructions: AVR_STEPS,
   },
   {
-    id: "avr-uno-clone-maker-uno",
-    name: "AVR-UNO-CLONE-MAKER-UNO",
-    family: "AVR",
-    protocol: "stk500v1",
-    firmware: [{ url: release("Chords-UNO-R3.bin"), address: 0 }],
-    accept: ".hex,.bin",
-    baudRates: [115200, 57600],
-    pageSize: 128,
-    instructions: [...AVR_STEPS, "CH340 clones need the CH340 driver on Windows and older macOS."],
-  },
-  {
     id: "avr-nano-classic",
     name: "AVR-NANO-CLASSIC",
     family: "AVR",
@@ -241,33 +231,11 @@ export const DEVICES: DeviceDef[] = [
     // New Optiboot first, then the "Old Bootloader" (ATmegaBOOT) speed.
     baudRates: [115200, 57600],
     pageSize: 128,
-    instructions: AVR_STEPS,
-  },
-  {
-    id: "avr-nano-clone-maker-nano",
-    name: "AVR-NANO-CLONE-MAKER-NANO",
-    family: "AVR",
-    protocol: "stk500v1",
-    firmware: [{ url: release("Chords-NANO-CLASSIC.bin"), address: 0 }],
-    accept: ".hex,.bin",
-    baudRates: [115200, 57600],
-    pageSize: 128,
     instructions: [...AVR_STEPS, "CH340 clones need the CH340 driver on Windows and older macOS."],
   },
   {
     id: "avr-mega-2560-r3",
     name: "AVR-MEGA-2560-R3",
-    family: "AVR",
-    protocol: "stk500v2",
-    firmware: [{ url: release("Chords-MEGA-2560-R3.bin"), address: 0 }],
-    accept: ".hex,.bin",
-    baudRates: [115200],
-    pageSize: 256,
-    instructions: AVR_STEPS,
-  },
-  {
-    id: "avr-mega-2560-clone",
-    name: "AVR-MEGA-2560-CLONE",
     family: "AVR",
     protocol: "stk500v2",
     firmware: [{ url: release("Chords-MEGA-2560-R3.bin"), address: 0 }],

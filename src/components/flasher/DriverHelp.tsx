@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { X } from "lucide-react";
 import { DRIVER_INSTALLER_URL, ZADIG_URL, driverInstallerCovers, usbIdOf, type DeviceDef } from "@/lib/flasher";
 
 const primary = "inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500";
@@ -64,9 +65,9 @@ export function DriverHelp({
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="-mr-1 -mt-0.5 rounded-md px-1.5 text-base leading-6 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+            className="-mr-1 -mt-0.5 rounded-md p-1 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
           >
-            ✕
+            <X className="h-4 w-4" />
           </button>
         </div>
         {reason && <p className="text-amber-300">{reason}</p>}

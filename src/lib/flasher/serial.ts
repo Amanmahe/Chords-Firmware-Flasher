@@ -124,8 +124,20 @@ export class SerialIO {
   }
 }
 
-/** Ask for a serial port (must run inside a click handler). */
+// The port picked with Connect: flashing uses it instead of asking again.
+let preferredPort: SerialPort | null = null;
+
+export function setPreferredSerialPort(port: SerialPort | null) {
+  preferredPort = port;
+}
+
+export function hasPreferredSerialPort() {
+  return preferredPort !== null;
+}
+
+/** The connected port, or ask for one (must run inside a click handler). */
 export async function pickSerialPort(filters?: SerialPortFilter[], cb?: FlashCallbacks) {
+  if (preferredPort) return preferredPort;
   if (!("serial" in navigator)) {
     throw new Error("Web Serial is not available. Use Chrome, Edge or Opera on desktop.");
   }
@@ -139,6 +151,7 @@ export async function pickSerialPort(filters?: SerialPortFilter[], cb?: FlashCal
 
 /** Reuse the one already-granted port matching `filters`; otherwise ask. */
 export async function findOrPickSerialPort(filters?: SerialPortFilter[], cb?: FlashCallbacks) {
+  if (preferredPort) return preferredPort;
   if (filters?.length && "serial" in navigator) {
     const ports = (await navigator.serial.getPorts()).filter((p) => {
       const i = p.getInfo();

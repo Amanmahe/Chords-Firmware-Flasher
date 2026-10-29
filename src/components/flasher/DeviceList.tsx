@@ -1,40 +1,22 @@
 "use client";
 
 import type { DeviceDef } from "@/lib/flasher";
-import { CheckCircle, ErrorCircle, IdleCircle, Spinner, WaitCircle } from "./icons";
 
 export type DeviceStatus = "idle" | "flashing" | "done" | "error" | "waiting";
 
 interface Props {
   devices: DeviceDef[];
   activeId: string;
-  status: Record<string, DeviceStatus>;
   onActivate: (id: string) => void;
 }
 
-function StatusIcon({ s }: { s: DeviceStatus }) {
-  switch (s) {
-    case "flashing":
-      return <Spinner />;
-    case "done":
-      return <CheckCircle />;
-    case "error":
-      return <ErrorCircle />;
-    case "waiting":
-      return <WaitCircle />;
-    default:
-      return <IdleCircle />;
-  }
-}
-
-export function DeviceList({ devices, activeId, status, onActivate }: Props) {
+export function DeviceList({ devices, activeId, onActivate }: Props) {
   return (
-    <ul className="flex flex-col gap-0.5" role="listbox" aria-label="Devices">
+    <ul className="flex flex-col gap-1" role="listbox" aria-label="Devices">
       {devices.map((d) => {
         const active = d.id === activeId;
         return (
-          <li key={d.id} className="relative">
-            {active && <span className="absolute -left-2 top-1.5 bottom-1.5 w-1 rounded-full bg-blue-500" />}
+          <li key={d.id}>
             <div
               role="option"
               aria-selected={active}
@@ -46,14 +28,18 @@ export function DeviceList({ devices, activeId, status, onActivate }: Props) {
                   onActivate(d.id);
                 }
               }}
-              className={`flex cursor-pointer items-center gap-3 rounded-lg px-2.5 py-1.5 text-[0.9375rem] outline-none transition-colors
+              className={`flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-[0.3rem] text-sm leading-5 outline-none transition-colors
                 focus-visible:ring-2 focus-visible:ring-blue-500
-                ${active ? "bg-neutral-800 font-semibold text-white" : "text-neutral-200 hover:bg-neutral-800/60"}`}
+                ${
+                  active
+                    ? "cursor-default border-blue-500/50 bg-blue-500/10 text-white"
+                    : "border-neutral-800 bg-neutral-950/40 text-neutral-200 hover:border-blue-500/40 hover:bg-blue-500/5"
+                }`}
             >
-              <span className="shrink-0">
-                <StatusIcon s={status[d.id] ?? "idle"} />
+              <span className="min-w-0 flex-1 truncate font-medium" title={d.name}>
+                {d.name}
               </span>
-              <span className="min-w-0 flex-1 break-words leading-snug">{d.name}</span>
+              {active && <span className="shrink-0 text-xs text-blue-300">Selected</span>}
             </div>
           </li>
         );

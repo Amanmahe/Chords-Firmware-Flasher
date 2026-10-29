@@ -1,7 +1,7 @@
 import { NeedsUserGesture, type DeviceDef, type FlashCallbacks, type FlashJob } from "./types";
 import { fileNameOf, loadFirmware, toBinary } from "./firmware";
 import { FIRMWARE_BASE } from "./devices";
-import { findOrPickSerialPort, pickSerialPort, sleep, touch1200 } from "./serial";
+import { findOrPickSerialPort, hasPreferredSerialPort, pickSerialPort, sleep, touch1200 } from "./serial";
 import { flashEsp } from "./esp";
 import { flashStk500v1, flashStk500v2 } from "./avr";
 import { flashDfu, flashDfuse } from "./dfu";
@@ -14,6 +14,7 @@ export * from "./types";
 export { DEVICES, FIRMWARE_BASE, PROTOCOL_LABEL } from "./devices";
 export { DRIVER_INSTALLER_URL, ZADIG_URL, driverInstallerCovers, usbIdOf } from "./drivers";
 export { downloadFirmware, fileNameOf, releaseVersion } from "./firmware";
+export { setPreferredSerialPort } from "./serial";
 export * from "./firmware-cache";
 
 export interface FlashRequest {
@@ -74,8 +75,9 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
   cb.log(`Firmware: ${parts.map((p) => p.name).join(", ")} (${(size / 1024).toFixed(1)} KB)`);
 
   // The browser only opens its port list for a few seconds after a click, and
-  // a slow firmware download (ESP32 images are 4 MB) can outlast that.
-  if (needsApi(req.device) === "serial" && navigator.userActivation?.isActive === false) {
+  // a slow firmware download (ESP32 images are 4 MB) can outlast that. A
+  // connected port needs no list.
+  if (needsApi(req.device) === "serial" && !hasPreferredSerialPort() && navigator.userActivation?.isActive === false) {
     throw new NeedsUserGesture("The firmware is ready. Click Continue and pick the board's serial port.");
   }
 
