@@ -49,13 +49,13 @@ export function DriverHelp({
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 desk:p-6" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="driver-help-title"
         onClick={(e) => e.stopPropagation()}
-        className="flex w-[40rem] max-w-full flex-col gap-3 rounded-xl border border-amber-500/40 bg-neutral-900 px-5 py-4 text-sm shadow-2xl"
+        className="flex max-h-full w-[40rem] max-w-full flex-col gap-3 overflow-y-auto rounded-xl border border-amber-500/40 bg-neutral-900 px-5 py-4 text-sm shadow-2xl"
       >
         <div className="flex items-start justify-between gap-4">
           <p id="driver-help-title" className="font-medium text-amber-200">

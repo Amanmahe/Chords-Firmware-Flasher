@@ -326,15 +326,15 @@ export default function Flasher() {
   };
 
   return (
-    // One screen that never scrolls: sizes are in rem and the root font size
-    // follows the window (globals.css), so the whole layout scales as one.
-    <div className="flex h-dvh flex-col overflow-hidden bg-neutral-950 text-neutral-100">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-neutral-800 bg-neutral-950/70 px-6 py-3 backdrop-blur">
+    // Large windows: one screen that never scrolls, scaled to fit (globals.css).
+    // Smaller ones: panels stack in one column and the page scrolls.
+    <div className="flex min-h-dvh flex-col bg-neutral-950 text-neutral-100 desk:h-dvh desk:overflow-hidden">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-neutral-800 bg-neutral-950/70 px-4 py-3 backdrop-blur desk:flex-nowrap desk:px-6">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-semibold tracking-tight text-neutral-50">Chords Firmware Flasher</h1>
-          <p className="truncate text-xs text-neutral-500">Works in Chrome, Edge and Opera on desktop</p>
+          <p className="truncate text-xs text-neutral-500">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center justify-end gap-3">
           {/* In the header rather than a banner, so the screen keeps its height. */}
           {!(support.serial && support.usb) && (
             <p className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
@@ -383,9 +383,9 @@ export default function Flasher() {
         </div>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-[20.5rem_minmax(0,1fr)_23rem] grid-rows-[minmax(0,1fr)] gap-5 p-5">
+      <main className="flex flex-col gap-4 p-4 desk:grid desk:min-h-0 desk:flex-1 desk:grid-cols-[20.5rem_minmax(0,1fr)_23rem] desk:grid-rows-[minmax(0,1fr)] desk:gap-5 desk:p-5">
         {/* ------------------------------------------------ device list */}
-        <aside className="flex min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-4">
+        <aside className="flex h-[20rem] min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 desk:h-auto">
           <div className="mb-2 flex shrink-0 items-center gap-2">
             <h2 className="text-sm font-medium text-neutral-300">Devices</h2>
             <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[0.625rem] tabular-nums text-blue-300">
@@ -398,7 +398,7 @@ export default function Flasher() {
         </aside>
 
         {/* ------------------------------------------------ detail panel */}
-        <section className="flex min-h-0 min-w-0 flex-col gap-5">
+        <section className="flex min-h-0 min-w-0 flex-col gap-4 desk:gap-5">
           <div className="space-y-3 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -434,7 +434,7 @@ export default function Flasher() {
                 setDragging(false);
                 pickFile(e.dataTransfer.files[0] ?? null);
               }}
-              className={`relative flex items-center gap-3 rounded-lg border px-4 py-3 ${
+              className={`relative flex flex-wrap items-center gap-3 rounded-lg border px-4 py-3 desk:flex-nowrap ${
                 customFile
                   ? "border-emerald-500/40 bg-emerald-500/5"
                   : active.firmware.length
@@ -452,7 +452,7 @@ export default function Flasher() {
                 className={`h-5 w-5 shrink-0 ${customFile ? "text-emerald-400" : active.firmware.length ? "text-blue-400" : "text-neutral-600"}`}
                 strokeWidth={1.5}
               />
-              <div className="min-w-0 flex-1">
+              <div className="min-w-[12rem] flex-1 desk:min-w-0">
                 {customFile ? (
                   <div className="flex min-w-0 items-baseline gap-2">
                     <p className="truncate font-medium text-emerald-300" title={customFile.name}>
@@ -632,7 +632,7 @@ export default function Flasher() {
           </div>
 
           {/* log */}
-          <div className="relative flex min-h-[8rem] flex-1 flex-col">
+          <div className="relative flex h-[24rem] flex-col desk:h-auto desk:min-h-[8rem] desk:flex-1">
             {/* Copy and Clear, pinned to the console's top-right corner */}
             <div className="absolute right-3 top-2.5 z-10 flex gap-1.5">
               <button
@@ -678,7 +678,7 @@ export default function Flasher() {
 
         {/* ------------------------------------------------ saved firmware */}
         <SavedFirmware
-          className="min-w-0"
+          className="h-[22rem] min-w-0 desk:h-auto"
           activeFiles={active.firmware.map((f) => fileNameOf(f.url))}
           busy={busy}
           log={log}
