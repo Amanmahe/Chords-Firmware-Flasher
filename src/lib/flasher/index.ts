@@ -1,13 +1,12 @@
 import { NeedsUserGesture, type DeviceDef, type FlashCallbacks, type FlashJob } from "./types";
 import { fileNameOf, loadFirmware, toBinary } from "./firmware";
 import { FIRMWARE_BASE } from "./devices";
-import { findOrPickSerialPort, hasPreferredSerialPort, pickSerialPort, sleep, touch1200 } from "./serial";
+import { findOrPickSerialPort, hasPreferredSerialPort, sleep, touch1200 } from "./serial";
 import { flashEsp } from "./esp";
 import { flashStk500v1, flashStk500v2 } from "./avr";
 import { flashDfu, flashDfuse } from "./dfu";
 import { findBootloaderUsb } from "./usb";
 import { flashUnoR4Wifi } from "./samba-r4";
-import { flashUf2 } from "./uf2";
 import { flashPicoboot } from "./picoboot";
 
 export * from "./types";
@@ -19,28 +18,21 @@ export * from "./firmware-cache";
 
 export interface FlashRequest {
   device: DeviceDef;
-  /** Custom upload; if absent the bundled firmware is fetched from /public. */
+  /** Custom upload; if absent the release firmware is used. */
   file?: File | null;
   /** ESP32: flash offset of a custom upload. */
   customAddress?: number;
-  eraseAll?: boolean;
-  verify?: boolean;
   /** DFU boards: board is already in bootloader mode (double-tapped RESET). */
   skipTouch?: boolean;
 }
 
 export function browserSupport() {
-  if (typeof navigator === "undefined") return { serial: false, usb: false, fsAccess: false };
-  return {
-    serial: "serial" in navigator,
-    usb: "usb" in navigator,
-    fsAccess: typeof window !== "undefined" && "showDirectoryPicker" in window,
-  };
+  if (typeof navigator === "undefined") return { serial: false, usb: false };
+  return { serial: "serial" in navigator, usb: "usb" in navigator };
 }
 
-export function needsApi(device: DeviceDef): "serial" | "usb" | "fs" {
+export function needsApi(device: DeviceDef): "serial" | "usb" {
   if (device.protocol === "dfu" || device.protocol === "dfuse" || device.protocol === "picoboot") return "usb";
-  if (device.protocol === "uf2") return "fs";
   return "serial";
 }
 
@@ -55,7 +47,7 @@ async function loadParts(req: FlashRequest, cb: FlashCallbacks): Promise<FlashJo
       address: req.customAddress ?? device.firmware[0]?.address ?? 0,
     });
   } else {
-    if (!device.firmware.length) throw new Error("No bundled firmware for this board. Upload a file.");
+    if (!device.firmware.length) throw new Error("No release firmware for this board. Upload a file.");
     for (const p of device.firmware) {
       const bytes = await loadFirmware(p.url, FIRMWARE_BASE, cb.log);
       raw.push({ bytes, name: p.label ?? fileNameOf(p.url), address: p.address });
@@ -63,7 +55,7 @@ async function loadParts(req: FlashRequest, cb: FlashCallbacks): Promise<FlashJo
   }
 
   return raw.map((r) => {
-    if (device.protocol === "uf2" || device.protocol === "picoboot") return { data: r.bytes, address: r.address, name: r.name };
+    if (device.protocol === "picoboot") return { data: r.bytes, address: r.address, name: r.name };
     const { data, start } = toBinary(r.bytes, r.name);
     return { data, address: start ?? r.address, name: r.name };
   });
@@ -84,7 +76,7 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
   const job: FlashJob = {
     device: req.device,
     parts,
-    options: { eraseAll: !!req.eraseAll, verify: req.verify ?? true },
+    options: { eraseAll: true, verify: true },
     cb,
   };
 
@@ -97,8 +89,6 @@ export async function flashDevice(req: FlashRequest, cb: FlashCallbacks) {
       return flashStk500v2(job);
     case "samba-r4":
       return flashUnoR4Wifi(job);
-    case "uf2":
-      return flashUf2(job);
     case "dfu":
     case "dfuse":
     case "picoboot": {
@@ -180,10 +170,4 @@ export async function forgetDevices() {
     }
   }
   return { usb, serial };
-}
-
-/** RP2040 running an Arduino sketch: 1200 baud touch reboots into BOOTSEL. */
-export async function resetToBootloader() {
-  const port = await pickSerialPort();
-  await touch1200(port);
 }

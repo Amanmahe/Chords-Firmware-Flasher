@@ -2,8 +2,6 @@
 
 import type { DeviceDef } from "@/lib/flasher";
 
-export type DeviceStatus = "idle" | "flashing" | "done" | "error" | "waiting";
-
 interface Props {
   devices: DeviceDef[];
   activeId: string;

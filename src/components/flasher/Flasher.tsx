@@ -10,7 +10,6 @@ import {
   Info,
   Link,
   Loader2,
-  RefreshCw,
   RotateCcw,
   TriangleAlert,
   Unplug,
@@ -30,15 +29,15 @@ import {
   forgetDevices,
   listSavedFirmware,
   needsApi,
-  resetToBootloader,
   setPreferredSerialPort,
   type DeviceDef,
 } from "@/lib/flasher";
-import { DeviceList, type DeviceStatus } from "./DeviceList";
+import { DeviceList } from "./DeviceList";
 import { DriverHelp } from "./DriverHelp";
 import { GithubMark } from "./icons";
 import { SavedFirmware } from "./SavedFirmware";
 
+type DeviceStatus = "flashing" | "done" | "error" | "waiting";
 type LogLine = { t: string; msg: string; kind: "info" | "ok" | "err" | "warn" };
 
 const REPO_URL = "https://github.com/Amanmahe/Chords-Firmware-Flasher";
@@ -66,7 +65,7 @@ export default function Flasher() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ pct: number; label: string } | null>(null);
   const [logs, setLogs] = useState<LogLine[]>([]);
-  const [support, setSupport] = useState({ serial: true, usb: true, fsAccess: true });
+  const [support, setSupport] = useState({ serial: true, usb: true });
   const [downloading, setDownloading] = useState(false);
   // Firmware files already saved in this browser: no need to download them.
   const [savedNames, setSavedNames] = useState<Set<string>>(new Set());
@@ -201,8 +200,6 @@ export default function Flasher() {
           device,
           file: files[device.id] ?? null,
           customAddress: Number.isFinite(addr) ? addr : undefined,
-          eraseAll: true,
-          verify: true,
           skipTouch: opts.skipTouch,
         },
         {
@@ -281,7 +278,6 @@ export default function Flasher() {
   const customFile = files[active.id];
   const isDfuTouch =
     (active.protocol === "dfu" || active.protocol === "dfuse" || active.protocol === "picoboot") && active.touch1200;
-  const flashTarget = active;
 
   const connect = async () => {
     try {
@@ -553,7 +549,7 @@ export default function Flasher() {
             <div className="flex items-center gap-3">
               <button
                 disabled={busy || apiMissing}
-                onClick={() => flash(flashTarget)}
+                onClick={() => flash(active)}
                 className="relative min-w-0 flex-1 overflow-hidden rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
               >
                 {busy && progress && (
@@ -571,7 +567,7 @@ export default function Flasher() {
                   ) : (
                     <>
                       <Zap className="h-4 w-4 shrink-0" />
-                      {status[flashTarget.id] === "waiting" ? "Continue" : `Flash ${flashTarget.name}`}
+                      {status[active.id] === "waiting" ? "Continue" : `Flash ${active.name}`}
                     </>
                   )}
                 </span>
@@ -588,24 +584,6 @@ export default function Flasher() {
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   Board is already in bootloader
-                </button>
-              )}
-
-              {active.protocol === "uf2" && (
-                <button
-                  disabled={busy || !support.serial}
-                  onClick={async () => {
-                    try {
-                      await resetToBootloader();
-                      log("Reset sent. Wait for the RPI-RP2 drive, then press Flash.", "warn");
-                    } catch (e) {
-                      log(`Error: ${e instanceof Error ? e.message : e}`, "err");
-                    }
-                  }}
-                  className={secondary}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Reset to BOOTSEL
                 </button>
               )}
 

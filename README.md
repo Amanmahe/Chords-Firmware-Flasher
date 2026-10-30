@@ -23,9 +23,8 @@ Downloaded files are saved in the browser (IndexedDB), so they don't have to be 
 | SAM-BA via ESP32-S3 bridge, 230400 baud | UNO R4 WiFi | Web Serial |
 | USB DFU 1.1 | UNO R4 Minima | WebUSB (1200-baud touch first) |
 | ST DfuSe | STM32 ROM bootloader, GIGA R1 | WebUSB |
-| UF2 drive | RP2040 | File System Access (download fallback) |
+| PICOBOOT | RP2040 | WebUSB (1200-baud touch first) |
 
 ## Known limitations
 - **USB bootloaders on Windows** (STM32, GIGA R1, UNO R4 Minima, Pico): the bootloader needs the WinUSB driver before WebUSB can open it. When a flash can't find or open the board, the page offers the driver installer (`public/drivers/ChordsDriverSetup.exe`), with Zadig as the alternative.
-- **RP2040:** Chrome may refuse to open some drive roots. If it does, the page downloads the `.uf2` so you can drag it onto RPI-RP2.
 - **Safari:** doesn't have Web Serial or WebUSB.

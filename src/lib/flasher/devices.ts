@@ -254,5 +254,4 @@ export const PROTOCOL_LABEL: Record<DeviceDef["protocol"], string> = {
   dfu: "WebUSB · DFU",
   dfuse: "WebUSB · DfuSe",
   picoboot: "WebUSB · PICOBOOT",
-  uf2: "UF2 drive",
 };

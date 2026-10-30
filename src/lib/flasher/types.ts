@@ -5,11 +5,10 @@ export type Protocol =
   | "samba-r4" // UNO R4 WiFi (SAM-BA over the ESP32-S3 USB bridge)
   | "dfu" // Plain USB DFU 1.1 over WebUSB (UNO R4 Minima)
   | "dfuse" // ST DfuSe over WebUSB (STM32 ROM bootloader, GIGA R1)
-  | "picoboot" // RP2040 BOOTSEL over WebUSB (PICOBOOT interface)
-  | "uf2"; // RP2040 BOOTSEL mass-storage drive
+  | "picoboot"; // RP2040 BOOTSEL over WebUSB (PICOBOOT interface)
 
 export interface FirmwarePart {
-  /** Path under /public, e.g. /firmware/esp32-s3/firmware.bin */
+  /** Release file URL (see FIRMWARE_BASE in devices.ts). */
   url: string;
   /** Flash offset. Only used by ESP32 (multi-part) and DfuSe devices. */
   address: number;
@@ -21,7 +20,7 @@ export interface DeviceDef {
   name: string;
   family: "ESP32" | "STM32" | "Arduino Renesas" | "Arduino Mbed" | "RP2040" | "AVR";
   protocol: Protocol;
-  /** Bundled firmware in /public. Leave empty to require a user upload. */
+  /** Firmware from the latest release. Leave empty to require a user upload. */
   firmware: FirmwarePart[];
   /** File extensions accepted for a custom upload. */
   accept: string;
