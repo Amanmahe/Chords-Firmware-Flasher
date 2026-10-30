@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+}
+
+/*
+ * Large windows: the flasher is one screen that never scrolls. Every size is
+ * in rem, and the root font size follows the window so a 100rem x 50rem
+ * layout always fits: whichever of width and height is tighter decides, and
+ * text and panels grow or shrink together.
+ *
+ * Smaller windows (where that would make text too small to read): normal 16px
+ * text, panels stacked in one column, and the page scrolls. The `desk:`
+ * variant below marks the classes that apply only to the large layout.
+ */
+@custom-variant desk (@media (min-width: 1200px) and (min-height: 600px));
+
+@media (min-width: 1200px) and (min-height: 600px) {
+  html {
+    font-size: min(1vw, 100dvh / 50);
+  }
+}
+
+/* Only a long log (or many saved files) ever scrolls inside its panel. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-700) transparent;
+}
