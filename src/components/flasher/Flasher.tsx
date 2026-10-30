@@ -41,7 +41,7 @@ import { SavedFirmware } from "./SavedFirmware";
 
 type LogLine = { t: string; msg: string; kind: "info" | "ok" | "err" | "warn" };
 
-const REPO_URL = "https://github.com/Amanmahe/web-flasher";
+const REPO_URL = "https://github.com/Amanmahe/Chords-Firmware-Flasher";
 const now = () => new Date().toLocaleTimeString([], { hour12: false });
 
 const isWindows = () => typeof navigator !== "undefined" && /Win/i.test(navigator.userAgent);

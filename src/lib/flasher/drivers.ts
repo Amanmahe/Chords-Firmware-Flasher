@@ -8,7 +8,7 @@
  */
 export const ZADIG_URL = "https://github.com/pbatard/libwdi/releases/download/v1.5.1/zadig-2.9.exe";
 
-// public/ is served under the site's base path (e.g. /web-flasher on GitHub Pages).
+// public/ is served under the site's base path (e.g. /Chords-Firmware-Flasher on GitHub Pages).
 export const DRIVER_INSTALLER_URL = `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/drivers/ChordsDriverSetup.exe`;
 
 /** Bootloaders (vendor:product) the Chords installer sets up; others need Zadig. */

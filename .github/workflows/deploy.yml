@@ -28,7 +28,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      # Gives the base path of the site, e.g. "/web-flasher"
+      # Gives the base path of the site, e.g. "/Chords-Firmware-Flasher"
       - id: pages
         uses: actions/configure-pages@v5
 

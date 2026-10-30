@@ -1,5 +1,5 @@
 {
-  "name": "web-flasher",
+  "name": "chords-firmware-flasher",
   "version": "0.1.0",
   "private": true,
   "scripts": {
