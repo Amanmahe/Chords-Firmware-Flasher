@@ -8,11 +8,9 @@ import {
   Copy,
   FileText,
   Info,
-  Link,
   Loader2,
   RotateCcw,
   TriangleAlert,
-  Unplug,
   Upload,
   X,
   Zap,
@@ -35,6 +33,7 @@ import {
 import { DeviceList } from "./DeviceList";
 import { DriverHelp } from "./DriverHelp";
 import { GithubMark } from "./icons";
+import { InfoButton } from "./InfoButton";
 import { SavedFirmware } from "./SavedFirmware";
 
 type DeviceStatus = "flashing" | "done" | "error" | "waiting";
@@ -279,6 +278,40 @@ export default function Flasher() {
   const isDfuTouch =
     (active.protocol === "dfu" || active.protocol === "dfuse" || active.protocol === "picoboot") && active.touch1200;
 
+  const unsupported =
+    !(support.serial && support.usb) &&
+    `This browser is missing ${[!support.serial && "Web Serial", !support.usb && "WebUSB"].filter(Boolean).join(" and ")}. ` +
+      "Open this page in desktop Chrome or Edge over HTTPS (or localhost).";
+  const connectionLabel = port
+    ? portGone
+      ? `${portName(port)} unplugged`
+      : `${portName(port)} connected`
+    : "Not connected";
+  const waitingHere = status[active.id] === "waiting";
+  const showDriverButton = needsWinUsb && needsApi(active) === "usb" && isWindows();
+
+  // The Flash button, in the flash panel on large windows and the footer on
+  // small ones. It fills with progress while flashing.
+  const flashButton = (className: string, label: string) => (
+    <button
+      disabled={busy || apiMissing}
+      onClick={() => flash(active)}
+      className={`relative min-w-0 overflow-hidden rounded-lg border border-emerald-500 bg-emerald-600 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-emerald-500/30 disabled:bg-emerald-500/15 disabled:text-emerald-200/70 disabled:shadow-none ${className}`}
+    >
+      {busy && progress && (
+        <span
+          className="absolute inset-y-0 left-0 bg-emerald-500/40 transition-[width] duration-150"
+          style={{ width: `${progress.pct}%` }}
+        />
+      )}
+      <span className={`relative flex items-center justify-center gap-1.5 whitespace-nowrap ${busy ? "tabular-nums text-neutral-100" : ""}`}>
+        {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <Zap className="h-4 w-4 shrink-0" />}
+        <span className="truncate">{label}</span>
+      </span>
+    </button>
+  );
+  const pct = `${(progress?.pct ?? 0).toFixed(0)}%`;
+
   const connect = async () => {
     try {
       const p = await navigator.serial.requestPort();
@@ -324,20 +357,26 @@ export default function Flasher() {
   return (
     // Large windows: one screen that never scrolls, scaled to fit (globals.css).
     // Smaller ones: panels stack in one column and the page scrolls.
-    <div className="flex min-h-dvh flex-col bg-neutral-950 text-neutral-100 desk:h-dvh desk:overflow-hidden">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-3 border-b border-neutral-800 bg-neutral-950/70 px-4 py-3 backdrop-blur desk:flex-nowrap desk:px-6">
+    // Smaller ones: panels stack in one column, the page scrolls, and flashing
+    // moves to a footer fixed to the bottom (the padding keeps the log clear of it).
+    <div className="flex min-h-dvh flex-col bg-[#0A1426] pb-[calc(4.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] text-neutral-100 desk:h-dvh desk:overflow-hidden desk:pb-0">
+      {/* Small screens get one compact line: title, GitHub, Connect, and a dot
+          for the connection status. */}
+      <header className="relative z-10 flex shrink-0 items-center justify-between gap-2 bg-[#09111D] px-4 py-2.5 shadow-md shadow-black/40 desk:gap-4 desk:px-6 desk:py-3">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold tracking-tight text-neutral-50">Chords Firmware Flasher</h1>
-          <p className="truncate text-xs text-neutral-500">Works in Chrome, Edge, Opera and Firefox 151+ on desktop</p>
+          <h1 className="truncate text-[0.9375rem] font-semibold tracking-tight text-white desk:text-lg">
+            Chords Firmware Flasher
+          </h1>
+          <p className="hidden truncate text-xs text-neutral-400 desk:block">
+            Works in Chrome, Edge, Opera and Firefox 151+ on desktop
+          </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
+        <div className="flex shrink-0 items-center gap-1.5 desk:gap-3">
           {/* In the header rather than a banner, so the screen keeps its height. */}
-          {!(support.serial && support.usb) && (
-            <p className="flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200">
+          {unsupported && (
+            <p className="hidden items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-200 desk:flex">
               <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
-              This browser is missing {!support.serial && "Web Serial"}
-              {!support.serial && !support.usb && " and "}
-              {!support.usb && "WebUSB"}. Open this page in desktop Chrome or Edge over HTTPS (or localhost).
+              {unsupported}
             </p>
           )}
           <a
@@ -345,48 +384,59 @@ export default function Flasher() {
             target="_blank"
             rel="noopener noreferrer"
             title="Chords Firmware Flasher on GitHub"
-            className="rounded-lg p-2 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-100"
+            className="rounded-lg p-1 text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-100 desk:p-2"
           >
             <GithubMark className="h-5 w-5" />
           </a>
-          <div className="flex items-center gap-2 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs">
+          <div
+            title={connectionLabel}
+            className="order-last flex items-center gap-2 text-xs desk:order-none desk:rounded-full desk:border desk:border-neutral-800 desk:bg-neutral-900 desk:px-3 desk:py-1.5"
+          >
             <span
-              className={`h-2 w-2 rounded-full ${port ? (portGone ? "bg-amber-400" : "bg-emerald-500") : "bg-neutral-600"}`}
+              className={`h-2.5 w-2.5 rounded-full desk:h-2 desk:w-2 ${port ? (portGone ? "bg-amber-400" : "bg-emerald-500") : "bg-neutral-600"}`}
             />
-            <span className={port ? "text-neutral-200" : "text-neutral-400"}>
-              {port ? (portGone ? `${portName(port)} unplugged` : `${portName(port)} connected`) : "Not connected"}
-            </span>
+            <span className={`hidden desk:inline ${port ? "text-neutral-200" : "text-neutral-400"}`}>{connectionLabel}</span>
           </div>
           {port ? (
             <button
               onClick={disconnect}
               disabled={busy}
-              className="flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+              className="whitespace-nowrap rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 desk:px-4 desk:py-2 desk:text-sm"
             >
-              <Unplug className="h-4 w-4" />
               Disconnect
             </button>
           ) : (
             <button
               onClick={connect}
               disabled={busy || !support.serial}
-              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+              className="whitespace-nowrap rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500 desk:px-4 desk:py-2 desk:text-sm"
             >
-              <Link className="h-4 w-4" />
-              Connect Device
+              Connect<span className="hidden desk:inline"> Device</span>
             </button>
           )}
         </div>
       </header>
 
       <main className="flex flex-col gap-4 p-4 desk:grid desk:min-h-0 desk:flex-1 desk:grid-cols-[20.5rem_minmax(0,1fr)_23rem] desk:grid-rows-[minmax(0,1fr)] desk:gap-5 desk:p-5">
+        {/* The compact navbar has no room for the browser warning. */}
+        {unsupported && (
+          <p className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200 desk:hidden">
+            <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+            {unsupported}
+          </p>
+        )}
+
         {/* ------------------------------------------------ device list */}
-        <aside className="flex h-[20rem] min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 desk:h-auto">
+        <aside className="flex h-[20rem] min-h-0 min-w-0 flex-col rounded-xl border border-blue-400/50 bg-neutral-900/60 p-4 desk:h-auto">
           <div className="mb-2 flex shrink-0 items-center gap-2">
             <h2 className="text-sm font-medium text-neutral-300">Devices</h2>
             <span className="rounded-full border border-blue-500/30 bg-blue-500/10 px-1.5 py-0.5 text-[0.625rem] tabular-nums text-blue-300">
               {DEVICES.length}
             </span>
+            <InfoButton label="devices">
+              Every board this flasher supports. Pick yours to see how to connect it and which firmware it gets: the
+              latest Chords release for that board, unless you choose your own file.
+            </InfoButton>
           </div>
           <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
             <DeviceList devices={DEVICES} activeId={activeId} onActivate={setActiveId} />
@@ -395,10 +445,16 @@ export default function Flasher() {
 
         {/* ------------------------------------------------ detail panel */}
         <section className="flex min-h-0 min-w-0 flex-col gap-4 desk:gap-5">
-          <div className="space-y-3 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-900/60 p-5">
+          <div className="space-y-3 overflow-y-auto rounded-xl border border-emerald-500/25 bg-neutral-900/70 p-5">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="text-base font-semibold text-neutral-100">{active.name}</h2>
+                <div className="flex items-center gap-1.5">
+                  <h2 className="text-base font-semibold text-neutral-100">{active.name}</h2>
+                  <InfoButton label="flashing firmware">
+                    Follow the steps for your board, then press Flash. The latest Chords release for this board is
+                    used unless you drop or choose your own file. Don&apos;t unplug the board while it&apos;s flashing.
+                  </InfoButton>
+                </div>
                 <p className="text-xs text-neutral-500">{active.family}</p>
               </div>
               <span className="shrink-0 rounded-full border border-neutral-800 bg-neutral-900 px-3 py-1 text-xs text-neutral-300">
@@ -545,60 +601,45 @@ export default function Flasher() {
               </label>
             )}
 
-            {/* actions: the Flash button fills with progress while flashing */}
-            <div className="flex items-center gap-3">
-              <button
-                disabled={busy || apiMissing}
-                onClick={() => flash(active)}
-                className="relative min-w-0 flex-1 overflow-hidden rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
-              >
-                {busy && progress && (
-                  <span
-                    className="absolute inset-y-0 left-0 bg-blue-500/40 transition-[width] duration-150"
-                    style={{ width: `${progress.pct}%` }}
-                  />
+            {/* Small screens flash from the footer instead. */}
+            <div className="hidden items-center gap-3 desk:flex">
+              {flashButton(
+                "flex-1 px-6 py-2.5",
+                busy
+                  ? `Flashing… ${pct}${progress?.label ? ` · ${progress.label}` : ""}`
+                  : waitingHere
+                    ? "Continue"
+                    : `Flash ${active.name}`,
+              )}
+            </div>
+
+            {(isDfuTouch || showDriverButton) && (
+              <div className="flex flex-wrap gap-2">
+                {isDfuTouch && (
+                  <button
+                    disabled={busy}
+                    onClick={() => runFlash(active, { skipTouch: true })}
+                    className={secondary}
+                    title="Use this after double-tapping RESET"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    Board is already in bootloader
+                  </button>
                 )}
-                <span className={`relative flex items-center justify-center gap-2 truncate ${busy ? "tabular-nums text-neutral-100" : ""}`}>
-                  {busy ? (
-                    <>
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                      {`Flashing… ${(progress?.pct ?? 0).toFixed(0)}%${progress?.label ? ` · ${progress.label}` : ""}`}
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="h-4 w-4 shrink-0" />
-                      {status[active.id] === "waiting" ? "Continue" : `Flash ${active.name}`}
-                    </>
-                  )}
-                </span>
-              </button>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              {isDfuTouch && (
-                <button
-                  disabled={busy}
-                  onClick={() => runFlash(active, { skipTouch: true })}
-                  className={secondary}
-                  title="Use this after double-tapping RESET"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Board is already in bootloader
-                </button>
-              )}
+                {showDriverButton && (
+                  <button
+                    onClick={() => setDriverOpen(true)}
+                    className={`${secondary} border-amber-500/40 text-amber-200 hover:bg-amber-500/10`}
+                  >
+                    <CircleHelp className="h-3.5 w-3.5" />
+                    USB driver help
+                  </button>
+                )}
+              </div>
+            )}
 
-              {needsWinUsb && needsApi(active) === "usb" && isWindows() && (
-                <button
-                  onClick={() => setDriverOpen(true)}
-                  className={`${secondary} border-amber-500/40 text-amber-200 hover:bg-amber-500/10`}
-                >
-                  <CircleHelp className="h-3.5 w-3.5" />
-                  USB driver help
-                </button>
-              )}
-            </div>
-
-            {status[active.id] === "waiting" && waiting?.id === active.id && (
+            {waitingHere && waiting?.id === active.id && (
               <div className="flex gap-3 rounded-lg border border-blue-500/40 bg-blue-500/10 px-4 py-3 text-sm">
                 <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-300" />
                 <div>
@@ -610,9 +651,13 @@ export default function Flasher() {
           </div>
 
           {/* log */}
-          <div className="relative flex h-[24rem] flex-col desk:h-auto desk:min-h-[8rem] desk:flex-1">
-            {/* Copy and Clear, pinned to the console's top-right corner */}
-            <div className="absolute right-3 top-2.5 z-10 flex gap-1.5">
+          <div className="relative flex h-[16rem] flex-col desk:h-auto desk:min-h-[8rem] desk:flex-1">
+            {/* Info, Copy and Clear, pinned to the console's top-right corner */}
+            <div className="absolute right-3 top-2.5 z-10 flex items-center gap-1.5">
+              <InfoButton label="the console">
+                Every step of connecting and flashing, as it happens. If something goes wrong, the reason is shown
+                here in red. Copy the log to share it when asking for help.
+              </InfoButton>
               <button
                 onClick={() => navigator.clipboard.writeText(logs.map((l) => `[${l.t}] ${l.msg}`).join("\n"))}
                 disabled={logs.length === 0}
@@ -627,7 +672,7 @@ export default function Flasher() {
             </div>
             <div
               ref={logRef}
-              className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-neutral-800 bg-neutral-950 px-4 py-3 pr-24 font-mono text-xs leading-relaxed break-words"
+              className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-white/50 bg-neutral-950 px-4 py-3 pr-32 font-mono text-xs leading-relaxed break-words"
             >
               {logs.length === 0 ? (
                 <p className="text-neutral-500">Select a board and press Flash.</p>
@@ -662,6 +707,67 @@ export default function Flasher() {
           log={log}
         />
       </main>
+
+      {/* Small screens: flashing lives in a footer that stays at the bottom */}
+      <footer className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-2 border-t border-emerald-500/25 bg-neutral-900 px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5 desk:hidden">
+        {/* The board and its firmware take the free space */}
+        <div
+          className={`flex h-10 min-w-0 flex-1 items-center gap-1 rounded-lg border pl-2.5 pr-1 ${
+            customFile
+              ? "border-emerald-500/40 bg-emerald-500/5"
+              : active.firmware.length
+                ? "border-blue-500/40 bg-blue-500/5"
+                : "border-dashed border-emerald-500/30 bg-emerald-500/[0.04]"
+          }`}
+        >
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-medium text-neutral-100" title={active.name}>
+              {active.name}
+            </p>
+            <p
+              className={`truncate text-[0.6875rem] ${customFile ? "text-emerald-300" : active.firmware.length ? "text-blue-300" : "text-neutral-500"}`}
+            >
+              {busy && progress?.label
+                ? progress.label
+                : customFile
+                  ? customFile.name
+                  : active.firmware.length
+                    ? active.firmware.map((f) => fileNameOf(f.url)).join(", ")
+                    : "No firmware selected"}
+            </p>
+          </div>
+          {customFile && (
+            <button
+              onClick={() => setFiles((m) => ({ ...m, [active.id]: null }))}
+              disabled={busy}
+              title="Use the latest release instead"
+              className="shrink-0 rounded-md p-1 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <label
+          title={customFile ? "Change file" : "Use your own file"}
+          aria-label={customFile ? "Change file" : "Use your own file"}
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-500/30 bg-blue-500/10 text-blue-300 transition-colors hover:bg-blue-500/20 ${
+            busy ? "pointer-events-none opacity-40" : "cursor-pointer"
+          }`}
+        >
+          <Upload className="h-4 w-4" />
+          <input
+            type="file"
+            accept={active.accept}
+            className="hidden"
+            onChange={(e) => {
+              pickFile(e.target.files?.[0] ?? null);
+              e.target.value = "";
+            }}
+          />
+        </label>
+        {flashButton("h-10 w-[5.75rem] shrink-0 px-2", busy ? pct : waitingHere ? "Continue" : "Flash")}
+      </footer>
 
       {driverOpen && needsApi(active) === "usb" && isWindows() && (
         <DriverHelp device={active} reason={driverReason} onClose={() => setDriverOpen(false)} />

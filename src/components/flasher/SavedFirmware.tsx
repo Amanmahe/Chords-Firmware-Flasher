@@ -15,6 +15,7 @@ import {
   type SavedFirmware as Saved,
 } from "@/lib/flasher";
 import { GithubMark } from "./icons";
+import { InfoButton } from "./InfoButton";
 
 const FIRMWARE_REPO_URL = "https://github.com/upsidedownlabs/Chords-Arduino-Firmware";
 
@@ -81,11 +82,15 @@ export function SavedFirmware({
   };
 
   return (
-    <aside className={`flex min-h-0 flex-col rounded-xl border border-neutral-800 bg-neutral-900/60 p-4 ${className}`}>
+    <aside className={`flex min-h-0 flex-col rounded-xl border border-violet-400/50 bg-neutral-900/60 p-4 ${className}`}>
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="truncate text-sm font-medium text-neutral-300">Downloaded firmware</h2>
           {latest && <span className="shrink-0 text-xs text-neutral-500">({latest})</span>}
+          <InfoButton label="downloaded firmware">
+            Firmware files saved in this browser, so flashing doesn&apos;t download them again. Use the download icon
+            to save every board&apos;s firmware at once. Files from an older release are updated on the next flash.
+          </InfoButton>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <a
