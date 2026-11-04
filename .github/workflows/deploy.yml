@@ -1,10 +1,9 @@
 name: Deploy to GitHub Pages
 
 # Builds the static site (next build -> out/) and publishes it to GitHub Pages
-# on every push to main. Needs Settings -> Pages -> Source: "GitHub Actions".
+# on every push, to any branch. Needs Settings -> Pages -> Source: "GitHub Actions".
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
