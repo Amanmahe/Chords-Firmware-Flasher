@@ -356,10 +356,10 @@ export default function Flasher() {
 
   return (
     // Large windows: one screen that never scrolls, scaled to fit (globals.css).
-    // Smaller ones: panels stack in one column and the page scrolls.
     // Smaller ones: panels stack in one column, the page scrolls, and flashing
-    // moves to a footer fixed to the bottom (the padding keeps the log clear of it).
-    <div className="flex min-h-dvh flex-col bg-[#0A1426] pb-[calc(4.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] text-neutral-100 desk:h-dvh desk:overflow-hidden desk:pb-0">
+    // moves to a footer fixed to the bottom. The bottom padding is the footer's
+    // height, so the last panel ends the same gap above it as between panels.
+    <div className="flex min-h-dvh flex-col bg-[#0A1426] pb-[calc(3.125rem+1px+max(0.625rem,env(safe-area-inset-bottom)))] text-neutral-100 desk:h-dvh desk:overflow-hidden desk:pb-0">
       {/* Small screens get one compact line: title, GitHub, Connect, and a dot
           for the connection status. */}
       <header className="relative z-10 flex shrink-0 items-center justify-between gap-2 bg-[#09111D] px-4 py-2.5 shadow-md shadow-black/40 desk:gap-4 desk:px-6 desk:py-3">
