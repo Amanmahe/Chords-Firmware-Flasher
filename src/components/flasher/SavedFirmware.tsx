@@ -85,9 +85,9 @@ export function SavedFirmware({
     <aside className={`flex min-h-0 flex-col rounded-xl border border-violet-400/50 bg-neutral-900/60 p-4 ${className}`}>
       <div className="flex shrink-0 items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-sm font-medium text-neutral-300">Downloaded firmware</h2>
+          <h2 className="truncate text-sm font-medium text-neutral-300">Your firmware</h2>
           {latest && <span className="shrink-0 text-xs text-neutral-500">({latest})</span>}
-          <InfoButton label="downloaded firmware">
+          <InfoButton label="your firmware">
             Firmware files saved in this browser, so flashing doesn&apos;t download them again. Use the download icon
             to save every board&apos;s firmware at once. Files from an older release are updated on the next flash.
           </InfoButton>

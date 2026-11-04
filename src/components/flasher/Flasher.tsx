@@ -86,6 +86,22 @@ export default function Flasher() {
   busyRef.current = busy;
 
   useEffect(() => setSupport(browserSupport()), []);
+
+  // Boards this browser can't flash (it lacks Web Serial or WebUSB), and why.
+  const unavailable = useMemo(
+    () =>
+      Object.fromEntries(
+        DEVICES.flatMap((d) => {
+          const reason = unavailableReason(d, support);
+          return reason ? [[d.id, reason]] : [];
+        }),
+      ) as Record<string, string>,
+    [support],
+  );
+  // Don't leave a board selected that can't be flashed here.
+  useEffect(() => {
+    setActiveId((id) => (unavailable[id] ? (DEVICES.find((d) => !unavailable[d.id])?.id ?? id) : id));
+  }, [unavailable]);
   useEffect(() => {
     const refresh = () => listSavedFirmware().then((l) => setSavedNames(new Set(l.map((f) => f.name))));
     refresh();
@@ -271,9 +287,7 @@ export default function Flasher() {
   // A board that waits for Continue is already in its bootloader: skip the reset.
   const flash = (device: DeviceDef) => runFlash(device, { skipTouch: status[device.id] === "waiting" });
 
-  const api = needsApi(active);
-  const apiMissing =
-    (api === "serial" && !support.serial) || (api === "usb" && (!support.usb || (active.touch1200 && !support.serial)));
+  const apiMissing = !!unavailable[active.id];
   const customFile = files[active.id];
   const isDfuTouch =
     (active.protocol === "dfu" || active.protocol === "dfuse" || active.protocol === "picoboot") && active.touch1200;
@@ -281,7 +295,7 @@ export default function Flasher() {
   const unsupported =
     !(support.serial && support.usb) &&
     `This browser is missing ${[!support.serial && "Web Serial", !support.usb && "WebUSB"].filter(Boolean).join(" and ")}. ` +
-      "Open this page in desktop Chrome or Edge over HTTPS (or localhost).";
+      "Boards that need it are greyed out. Open this page in desktop Chrome or Edge over HTTPS (or localhost).";
   const connectionLabel = port
     ? portGone
       ? `${portName(port)} unplugged`
@@ -439,7 +453,7 @@ export default function Flasher() {
             </InfoButton>
           </div>
           <div className="-mr-2 min-h-0 flex-1 overflow-y-auto pr-2">
-            <DeviceList devices={DEVICES} activeId={activeId} onActivate={setActiveId} />
+            <DeviceList devices={DEVICES} activeId={activeId} onActivate={setActiveId} unavailable={unavailable} />
           </div>
         </aside>
 
@@ -791,6 +805,19 @@ const VENDORS: Record<number, string> = {
   0x0403: "FTDI",
   0x0483: "STM32",
 };
+
+/** Why this browser can't flash a board, or null if it can. */
+function unavailableReason(d: DeviceDef, support: { serial: boolean; usb: boolean }) {
+  // USB bootloaders restarted with a 1200-baud touch need both APIs.
+  const touchUsb = needsApi(d) === "usb" && d.touch1200;
+  const needed = needsApi(d) === "usb" ? (touchUsb ? ["Web Serial", "WebUSB"] : ["WebUSB"]) : ["Web Serial"];
+  const missing = needed.filter((a) => (a === "WebUSB" ? !support.usb : !support.serial));
+  if (!missing.length) return null;
+  const why = touchUsb
+    ? "This board needs Web Serial to restart it into its bootloader and WebUSB to flash it"
+    : `This board is flashed over ${needed[0]}`;
+  return `${why}, and this browser doesn't have ${missing.join(" or ")}. Open this page in desktop Chrome, Edge or Opera to flash it.`;
+}
 
 /** A short name for a serial port, from its USB IDs. */
 function portName(p: SerialPort) {

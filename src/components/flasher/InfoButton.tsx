@@ -1,14 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
-import { Info } from "lucide-react";
+import { Info, TriangleAlert } from "lucide-react";
 
 /**
- * Small "i" button that explains a section. Hovering shows the popover until
+ * Small "i" button that explains a section (or, with `warning`, an amber
+ * triangle that explains why something isn't available). Hovering shows the popover until
  * the pointer leaves; a click (or tap) pins it open. The popover is fixed to
  * the window so scrolling panels can't clip it.
  */
-export function InfoButton({ label, children }: { label: string; children: ReactNode }) {
+export function InfoButton({
+  label,
+  warning = false,
+  children,
+}: {
+  label: string;
+  warning?: boolean;
+  children: ReactNode;
+}) {
   const [pos, setPos] = useState<CSSProperties | null>(null);
   const [pinned, setPinned] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -97,11 +106,19 @@ export function InfoButton({ label, children }: { label: string; children: React
         onBlur={(e) => !pinned && !popoverRef.current?.contains(e.relatedTarget as Node) && setPos(null)}
         aria-label={`About ${label}`}
         aria-expanded={!!pos}
-        className={`shrink-0 rounded-full transition-colors hover:text-blue-300 ${pos ? "text-blue-300" : "text-blue-400"}`}
+        className={`shrink-0 rounded-full transition-colors ${
+          warning
+            ? `hover:text-amber-200 ${pos ? "text-amber-200" : "text-amber-400"}`
+            : `hover:text-blue-300 ${pos ? "text-blue-300" : "text-blue-400"}`
+        }`}
       >
         {/* A slightly larger, bolder icon than the text around it stays sharp
             when the page scales to small sizes. */}
-        <Info className="h-4 w-4" strokeWidth={2.25} />
+        {warning ? (
+          <TriangleAlert className="h-4 w-4" strokeWidth={2.25} />
+        ) : (
+          <Info className="h-4 w-4" strokeWidth={2.25} />
+        )}
       </button>
       {pos && (
         <div
