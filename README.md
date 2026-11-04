@@ -25,6 +25,10 @@ Downloaded files are saved in the browser (IndexedDB), so they don't have to be 
 | ST DfuSe | STM32 ROM bootloader, GIGA R1 | WebUSB |
 | PICOBOOT | RP2040 | WebUSB (1200-baud touch first) |
 
+## 3. Layout
+
+On a large window the flasher is one screen that never scrolls; it scales with the window (see `src/app/globals.css`). In a narrow, portrait or short window, the panels stack in one column and flashing moves to a bar at the bottom of the screen. Each section has an **i** button: hover over it or click it for a short explanation.
+
 ## Known limitations
 - **USB bootloaders on Windows** (STM32, GIGA R1, UNO R4 Minima, Pico): the bootloader needs the WinUSB driver before WebUSB can open it. When a flash can't find or open the board, the page offers the driver installer (`public/drivers/ChordsDriverSetup.exe`), with Zadig as the alternative.
 - **Safari:** doesn't have Web Serial or WebUSB.
