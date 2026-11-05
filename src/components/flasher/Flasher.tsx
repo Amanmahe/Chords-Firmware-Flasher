@@ -25,8 +25,10 @@ import {
   firmwareCacheEvents,
   flashDevice,
   forgetDevices,
+  getSavedFirmware,
   listSavedFirmware,
   needsApi,
+  saveFirmware,
   setPreferredSerialPort,
   type DeviceDef,
 } from "@/lib/flasher";
@@ -295,7 +297,7 @@ export default function Flasher() {
   const unsupported =
     !(support.serial && support.usb) &&
     `This browser is missing ${[!support.serial && "Web Serial", !support.usb && "WebUSB"].filter(Boolean).join(" and ")}. ` +
-      "Boards that need it are greyed out. Open this page in desktop Chrome or Edge over HTTPS (or localhost).";
+      "Boards that need it are greyed out. Open this page in desktop Chrome or Edge.";
   const connectionLabel = port
     ? portGone
       ? `${portName(port)} unplugged`
@@ -357,7 +359,9 @@ export default function Flasher() {
     }
   };
 
-  const pickFile = (f: File | null) => {
+  // A file the user chose or dropped is also saved under "Your firmware",
+  // unless it came from there.
+  const pickFile = async (f: File | null, { save = true } = {}) => {
     if (!f || busy) return;
     const exts = active.accept.split(",");
     if (!exts.some((x) => f.name.toLowerCase().endsWith(x.trim()))) {
@@ -366,6 +370,16 @@ export default function Flasher() {
     }
     setFiles((m) => ({ ...m, [active.id]: f }));
     log(`Selected ${f.name} (${(f.size / 1024).toFixed(1)} KB)`);
+    if (save) {
+      const data = new Uint8Array(await f.arrayBuffer());
+      await saveFirmware({ name: f.name, version: null, size: f.size, savedAt: Date.now(), url: "" }, data);
+    }
+  };
+
+  // Use a file saved under "Your firmware" for the selected board.
+  const useSaved = async (name: string) => {
+    const rec = await getSavedFirmware(name);
+    if (rec) pickFile(new File([rec.data], name), { save: false });
   };
 
   return (
@@ -573,23 +587,6 @@ export default function Flasher() {
                     </button>
                   ),
                 )}
-              <label
-                className={`flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 transition-colors hover:bg-emerald-500/20 ${
-                  busy ? "pointer-events-none opacity-50" : "cursor-pointer"
-                }`}
-              >
-                <Upload className="h-3.5 w-3.5" />
-                {customFile ? "Change file" : "Use your own file"}
-                <input
-                  type="file"
-                  accept={active.accept}
-                  className="hidden"
-                  onChange={(e) => {
-                    pickFile(e.target.files?.[0] ?? null);
-                    e.target.value = "";
-                  }}
-                />
-              </label>
               {customFile && (
                 <button
                   onClick={() => setFiles((m) => ({ ...m, [active.id]: null }))}
@@ -617,6 +614,23 @@ export default function Flasher() {
 
             {/* Small screens flash from the footer instead. */}
             <div className="hidden items-center gap-3 desk:flex">
+              <label
+                className={`flex shrink-0 items-center gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-4 py-2.5 text-sm font-medium text-blue-300 transition-colors hover:bg-blue-500/20 ${
+                  busy ? "pointer-events-none opacity-50" : "cursor-pointer"
+                }`}
+              >
+                <Upload className="h-4 w-4" />
+                {customFile ? "Change file" : "Use your own file"}
+                <input
+                  type="file"
+                  accept={active.accept}
+                  className="hidden"
+                  onChange={(e) => {
+                    pickFile(e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
               {flashButton(
                 "flex-1 px-6 py-2.5",
                 busy
@@ -716,9 +730,10 @@ export default function Flasher() {
         {/* ------------------------------------------------ saved firmware */}
         <SavedFirmware
           className="h-[22rem] min-w-0 desk:h-auto"
-          activeFiles={active.firmware.map((f) => fileNameOf(f.url))}
+          activeFiles={customFile ? [customFile.name] : active.firmware.map((f) => fileNameOf(f.url))}
           busy={busy}
           log={log}
+          onUse={useSaved}
         />
       </main>
 

@@ -31,12 +31,15 @@ export function SavedFirmware({
   activeFiles,
   busy,
   log,
+  onUse,
 }: {
   className?: string;
   /** File names the selected board flashes, highlighted in the list. */
   activeFiles: string[];
   busy: boolean;
   log: (msg: string, kind?: "info" | "ok" | "err" | "warn") => void;
+  /** Use one of the user's own saved files for the selected board. */
+  onUse: (name: string) => void;
 }) {
   const [saved, setSaved] = useState<Saved[]>([]);
   const [latest, setLatest] = useState<string | null>(null);
@@ -90,6 +93,7 @@ export function SavedFirmware({
           <InfoButton label="your firmware">
             Firmware files saved in this browser, so flashing doesn&apos;t download them again. Use the download icon
             to save every board&apos;s firmware at once. Files from an older release are updated on the next flash.
+            Files you choose yourself are saved here too: click one to use it for the selected board.
           </InfoButton>
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
@@ -121,21 +125,42 @@ export function SavedFirmware({
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-dashed border-neutral-700 bg-neutral-950/50 p-4 text-center">
           <FileText className="mx-auto mb-2 h-8 w-8 text-neutral-700" strokeWidth={1.25} />
           <p className="text-sm text-neutral-400">Nothing saved yet</p>
-          <p className="mt-1 text-xs text-neutral-500">Firmware is saved here the first time you flash or download it.</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            Firmware is saved here when you flash or download it, or choose your own file.
+          </p>
         </div>
       ) : (
         <ul className="-mr-2 min-h-0 flex-1 space-y-1 overflow-y-auto pr-2">
           {saved.map((f) => {
             const outdated = latest && f.version && f.version !== latest;
             const current = activeFiles.includes(f.name);
+            // Files the user added (not from a release) can be picked again.
+            const own = !f.url;
+            const use = () => own && !busy && !current && onUse(f.name);
             return (
               <li
                 key={f.name}
-                className={`group flex items-center gap-2.5 rounded-lg border px-3 py-1.5 transition-colors ${
-                  current ? "border-blue-500/50 bg-blue-500/10" : "border-neutral-800 bg-neutral-950/40"
+                role={own ? "button" : undefined}
+                tabIndex={own ? 0 : undefined}
+                title={own && !current ? "Use this file for the selected board" : undefined}
+                onClick={use}
+                onKeyDown={(e) => {
+                  if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+                    e.preventDefault();
+                    use();
+                  }
+                }}
+                className={`group flex items-center gap-2.5 rounded-lg border px-3 py-1.5 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-violet-500 ${
+                  current
+                    ? "border-blue-500/50 bg-blue-500/10"
+                    : own
+                      ? "cursor-pointer border-neutral-800 bg-neutral-950/40 hover:border-violet-400/40 hover:bg-violet-500/5"
+                      : "border-neutral-800 bg-neutral-950/40"
                 }`}
               >
-                {outdated ? (
+                {own ? (
+                  <FileText className="h-4 w-4 shrink-0 text-violet-300" />
+                ) : outdated ? (
                   <TriangleAlert className="h-4 w-4 shrink-0 text-amber-300" />
                 ) : (
                   <Check className="h-4 w-4 shrink-0 text-emerald-400" />
@@ -146,7 +171,9 @@ export function SavedFirmware({
                   </p>
                   <p className="truncate text-xs text-neutral-500" title={`Saved ${when(f.savedAt)}`}>
                     {kb(f.size)} ·{" "}
-                    {outdated ? (
+                    {own ? (
+                      <span>Your file · {when(f.savedAt)}</span>
+                    ) : outdated ? (
                       <span className="text-amber-300">update on next flash</span>
                     ) : (
                       <span>{f.version ?? when(f.savedAt)}</span>
@@ -154,7 +181,10 @@ export function SavedFirmware({
                   </p>
                 </div>
                 <button
-                  onClick={() => saveToDisk(f.name)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    saveToDisk(f.name);
+                  }}
                   title="Save the file to this computer"
                   className="shrink-0 rounded-md p-1 text-neutral-500 opacity-0 transition hover:bg-neutral-800 hover:text-neutral-200 focus:opacity-100 group-hover:opacity-100"
                 >
@@ -162,7 +192,10 @@ export function SavedFirmware({
                 </button>
                 <button
                   disabled={busy}
-                  onClick={() => deleteSavedFirmware(f.name)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteSavedFirmware(f.name);
+                  }}
                   title="Delete"
                   className="shrink-0 rounded-md p-1 text-neutral-500 opacity-0 transition hover:bg-red-500/10 hover:text-red-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
                 >
